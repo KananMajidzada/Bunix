@@ -109,6 +109,22 @@ export fn release(addr: uintptr) void = {
 	clear((addr / PAGE): u64);
 };
 
+// Marks a physical range as in use, so the allocator keeps it for something
+// else. Used to hold back the fixed region user programs are loaded into.
+export fn reserve(base: uintptr, count: u64) void = {
+	const lo = (base / PAGE): u64;
+	if (lo >= nframes) {
+		return;
+	};
+	let hi = ((base + (count: uintptr)) / PAGE): u64;
+	if (hi > nframes) {
+		hi = nframes;
+	};
+	for (let i = lo; i < hi; i += 1) {
+		set(i);
+	};
+};
+
 export fn free_frames() u64 = {
 	let n = 0u64;
 	for (let i = 0u64; i < nframes; i += 1) {

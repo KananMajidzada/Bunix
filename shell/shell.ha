@@ -1,11 +1,11 @@
 use arch;
 use console;
 use fs;
+use loader;
 use mem;
 use rt;
 use sched;
 use sys;
-use user;
 
 def BUFSZ: size = 256;
 
@@ -190,22 +190,7 @@ fn show_threads() void = {
 };
 
 fn run_user() void = {
-	const pages = ((len(user::prog) + 4095) / 4096): u64;
-	const code = mem::frames_alloc(pages);
-	if (code == 0) {
-		console::println("no memory for the user program");
-		return;
-	};
-	for (let i = 0z; i < len(user::prog); i += 1) {
-		const p = (code + (i: uintptr)): *u8;
-		*p = user::prog[i];
-	};
-	const ustack = mem::frames_alloc(2);
-	if (ustack == 0) {
-		console::println("no memory for the user stack");
-		return;
-	};
-	const id = sched::spawn_user(code, ustack + 8192: uintptr);
+	const id = loader::run();
 	if (id == sched::NOID) {
 		console::println("could not start the user process");
 		return;

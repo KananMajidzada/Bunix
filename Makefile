@@ -17,23 +17,24 @@ bunix: user/blob.ha $(SRCS)
 bunix.bin: bunix
 	$(OBJCOPY) -O binary bunix $@
 
-# The user program is assembled and linked into a flat blob, then folded into
-# the kernel as a byte array the shell can load into a fresh frame.
-build/prog.o: user/prog.asm
+# The user program is a freestanding Hare program with its own runtime under
+# userland/. It links at a fixed address, so it becomes a flat blob folded into
+# the kernel as a byte array the shell loads into the reserved user region.
+USER_SRCS = $(shell find userland -name '*.ha' -o -name '*.s' -o -name '*.sc')
+
+build/userprog: $(USER_SRCS)
 	@mkdir -p build
-	$(AS) --64 -o $@ $<
+	cd userland && HAREPATH=. $(HARE) build -F -a$(ARCH) -o $(CURDIR)/build/userprog
 
-build/prog.elf: build/prog.o user/link.ld
-	$(LD) -T user/link.ld -o $@ build/prog.o
-
-build/prog.bin: build/prog.elf
+build/prog.bin: build/userprog
 	$(OBJCOPY) -O binary $< $@
 
 user/blob.ha: build/prog.bin
 	@{ n=$$(wc -c < build/prog.bin); \
+	   e=$$(nm build/userprog | awk '$$3 == "_start" { print $$1 }'); \
 	   printf 'export const prog: [%s]u8 = [' "$$n"; \
 	   od -An -tu1 -v build/prog.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
-	   printf '];\n'; } > $@
+	   printf '];\nexport const entry: u64 = 0x%s;\n' "$$e"; } > $@
 
 run: bunix.bin
 	$(QEMU) -m 256 -kernel bunix.bin -serial stdio

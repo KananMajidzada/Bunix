@@ -1,11 +1,13 @@
 use arch;
 use console;
 use fs;
+use mem;
 use sched;
 
 export def EXIT: u64 = 0;
 export def WRITE: u64 = 1;
 export def READFILE: u64 = 2;
+export def ALLOC: u64 = 3;
 
 type raw = struct {
 	data: *[*]u8,
@@ -51,6 +53,9 @@ fn handle(regs: *arch::registers) uintptr = {
 		return regs: uintptr;
 	case READFILE =>
 		regs.rax = readfile(regs);
+		return regs: uintptr;
+	case ALLOC =>
+		regs.rax = mem::frames_alloc(regs.rdi): u64;
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;
