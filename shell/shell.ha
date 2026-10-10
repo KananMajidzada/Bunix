@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, ls, cat, write, mkdir, touch, rm, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, write, mkdir, touch, rm, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, sh, fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -82,6 +82,8 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		run_user(*(&line[5..]: *str));
 	} else if (eq(line, "multi")) {
 		multi();
+	} else if (eq(line, "sh")) {
+		run_user("/sh");
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);

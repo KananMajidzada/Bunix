@@ -57,6 +57,50 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 
+	if (rt::strcmp(a, "/sh")) {
+		rt::println("bunix user shell, type 'exit'");
+		for (true) {
+			rt::print("ush> ");
+			let lb: [128]u8 = [0...];
+			let n = 0z;
+			for (true) {
+				const c = rt::getchar();
+				if (c == ('\n': u8) || c == ('\r': u8)) {
+					rt::println("");
+					break;
+				};
+				if (c == 8 || c == 127) {
+					if (n > 0) {
+						n -= 1;
+						rt::print("\b \b");
+					};
+					continue;
+				};
+				if (n < 127) {
+					lb[n] = c;
+					n += 1;
+					rt::putc(c);
+				};
+			};
+			const line = *(&lb[..n]: *[]u8);
+			if (str_eq(line, "exit")) {
+				rt::println("bye");
+				break;
+			};
+			if (len(line) == 0) {
+				continue;
+			};
+			if (starts2(line, "cat ")) {
+				run_cat(line[4..]);
+			} else if (starts2(line, "ls ")) {
+				run_cat(line[3..]);
+			} else {
+				run_cat(line);
+			};
+		};
+		return;
+	};
+
 	let buf: [256]u8 = [0...];
 	const n = rt::readfile(a, buf[..]);
 	if (n == 0) {
@@ -79,4 +123,43 @@ fn starts(s: str, p: str) bool = {
 		};
 	};
 	return true;
+};
+
+fn starts2(b: []u8, p: str) bool = {
+	const pb = *(&p: *[]u8);
+	if (len(b) < len(pb)) {
+		return false;
+	};
+	for (let i = 0z; i < len(pb); i += 1) {
+		if (b[i] != pb[i]) {
+			return false;
+		};
+	};
+	return true;
+};
+
+fn str_eq(b: []u8, s: str) bool = {
+	const sb = *(&s: *[]u8);
+	if (len(b) != len(sb)) {
+		return false;
+	};
+	for (let i = 0z; i < len(b); i += 1) {
+		if (b[i] != sb[i]) {
+			return false;
+		};
+	};
+	return true;
+};
+
+fn run_cat(path: []u8) void = {
+	let buf: [512]u8 = [0...];
+	const n = rt::readfile(*(&path: *str), buf[..]);
+	if (n == 0) {
+		rt::println("no such file");
+		return;
+	};
+	rt::write(buf[..n]);
+	if (buf[n - 1] != ('\n': u8)) {
+		rt::println("");
+	};
 };

@@ -8,6 +8,8 @@ export def WRITE: u64 = 1;
 export def READFILE: u64 = 2;
 export def ALLOC: u64 = 3;
 export def WRITEFILE: u64 = 4;
+export def READCHR: u64 = 5;
+export def YIELD: u64 = 6;
 
 type raw = struct {
 	data: *[*]u8,
@@ -67,6 +69,12 @@ fn handle(regs: *arch::registers) uintptr = {
 	case WRITEFILE =>
 		regs.rax = writefile(regs);
 		return regs: uintptr;
+	case READCHR =>
+		regs.rax = console::pollch(): u64;
+		return regs: uintptr;
+	case YIELD =>
+		regs.rax = 0;
+		return sched::tick(regs);
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;
 		return regs: uintptr;

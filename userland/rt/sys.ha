@@ -19,6 +19,8 @@ type shdr = struct {
 	dptr: uintptr,
 	dlen: size,
 ) u64;
+@symbol("rt.sys_readchr") fn sys_readchr() u64;
+@symbol("rt.sys_yield") fn sys_yield() u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -65,6 +67,21 @@ export fn printnum(n: u64) void = {
 export fn exit() never = sys_exit();
 
 export fn page_alloc(pages: u64) uintptr = sys_alloc(pages);
+
+export fn putc(ch: u8) void = {
+	let b: [1]u8 = [ch];
+	write(b[..]);
+};
+
+export fn getchar() u8 = {
+	for (true) {
+		const c = sys_readchr();
+		if (c != 0) {
+			return (c & 0xFF): u8;
+		};
+		_ = sys_yield();
+	};
+};
 
 export fn readfile(path: str, dest: []u8) size = {
 	const p = *(&path: *shdr);

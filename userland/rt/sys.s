@@ -30,6 +30,18 @@ rt.sys_writefile:
 	int $0x80
 	ret
 
+.global rt.sys_readchr
+rt.sys_readchr:
+	movq $5, %rax
+	int $0x80
+	ret
+
+.global rt.sys_yield
+rt.sys_yield:
+	movq $6, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

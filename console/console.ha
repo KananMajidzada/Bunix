@@ -61,6 +61,17 @@ export fn getch() u8 = {
 	};
 };
 
+// Returns one byte, or zero when nothing is waiting.
+export fn pollch() u8 = {
+	if (serial_has_data()) {
+		return serial_getc();
+	};
+	if (keyboard_has_data()) {
+		return keyboard_getc();
+	};
+	return 0;
+};
+
 @init fn init() void = {
 	serial_init();
 	vga_init();
