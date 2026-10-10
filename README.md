@@ -32,6 +32,7 @@ COM1.
 | `arch/`     | x86_64 CPU, port, interrupt, PIC, timer code    |
 | `boot/`     | Multiboot information parsing                   |
 | `mem/`      | Physical frame allocator                        |
+| `ninep/`    | 9P2000 wire format, a tiny server, and a client |
 | `console/`  | Serial, VGA text, and keyboard                  |
 | `shell/`    | Console command loop                            |
 | `main.ha`   | Kernel entry point                              |
@@ -43,7 +44,10 @@ Multiboot memory map, manages physical frames with a bitmap, and runs a
 PIT-driven clock behind an interrupt descriptor table. A small command loop is
 available on the console:
 
-	echo clear frames fault halt help mem uptime
+	echo clear frames fault halt help mem uptime 9p
+
+The `9p` command runs a full version/attach/walk/open/read/clunk exchange
+against an in-memory file server, so the 9P layer is exercised end to end.
 
 ![boot](doc/boot.png)
 

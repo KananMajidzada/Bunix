@@ -1,6 +1,7 @@
 use arch;
 use console;
 use mem;
+use ninep;
 use rt;
 
 // A placeholder command loop. The real shell will be a 9P client; for now this
@@ -43,12 +44,17 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, echo, clear, mem, frames, uptime, fault, halt");
+		console::println("commands: help, echo, clear, mem, frames, uptime, 9p, fault, halt");
 	} else if (prefix(line, "echo ")) {
 		console::write(line[len("echo ")..]);
 		console::putc('\n': u8);
 	} else if (eq(line, "clear")) {
 		console::clear();
+	} else if (eq(line, "9p")) {
+		let srv = ninep::new("hello from 9P\n");
+		const data = ninep::slurp(&srv, "hello");
+		console::print("9p: ");
+		console::write(data);
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
