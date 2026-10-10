@@ -50,6 +50,24 @@ Multiboot information structure.
 There is no higher-half mapping yet. The kernel runs where it is loaded, at 1
 MiB, and moves once there is a reason to.
 
+## Processes and memory
+
+Kernel threads are scheduled round-robin by the timer. Each thread carries a
+stack and a saved register frame; the timer interrupt swaps frames to switch.
+
+User processes run in ring 3. The GDT carries ring-3 code and data segments plus
+a TSS that holds the kernel stack used when a trap enters the kernel. System
+calls arrive on `int 0x80`, with the number in `rax` and arguments in `rdi`,
+`rsi`, `rdx`, and `rcx`.
+
+Every process has its own page tables. The kernel identity maps the first
+gigabyte supervisor-only in each address space, so traps and system calls keep
+working after the switch, while a private 2 MiB window at `0x400000` is mapped
+user-accessible through a dedicated page table. The scheduler loads the right
+page tables on each switch. User memory is handed out by mapping fresh frames
+into that window. A process that touches supervisor memory or an unmapped
+address is killed, and the rest of the system keeps running.
+
 ## Conventions
 
 The tree follows the upstream Hare style guide, with a few local habits kept
@@ -64,16 +82,17 @@ consistent everywhere:
 ## Status
 
 Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
-physical frame allocator, timer interrupts with an IDT, a runtime heap, and a
-first cut of the Bunix File Protocol.
+physical frame allocator, timer interrupts with an IDT, a runtime heap, kernel
+threads, a first userspace process, per-process address spaces, and a small file
+namespace over the Bunix File Protocol.
 
-Next: a scheduler and kernel threads, then a first userspace process.
+Next: an init process and file-server writes, then the port environment.
 
 ## Roadmap
 
 1. Console, memory map, and a physical page allocator. [done]
-2. Interrupts, a timer, and a scheduler. [interrupts and timer done]
-3. Kernel threads and a first userspace process.
-4. A file-server core and a per-process namespace. [wire format and a toy server done]
-5. `/dev`, `/proc`, and an init process.
+2. Interrupts, a timer, and a scheduler. [done]
+3. Kernel threads and a first userspace process. [done]
+4. A file-server core and a per-process namespace. [file-server core done]
+5. `/dev`, `/proc`, and an init process. [partial: /dev, /proc done]
 6. The port environment: a POSIX library, a shell, and a C compiler driver.
