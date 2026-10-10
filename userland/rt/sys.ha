@@ -13,6 +13,12 @@ type shdr = struct {
 	dlen: size,
 ) u64;
 @symbol("rt.sys_alloc") fn sys_alloc(pages: u64) uintptr;
+@symbol("rt.sys_writefile") fn sys_writefile(
+	pptr: uintptr,
+	plen: size,
+	dptr: uintptr,
+	dlen: size,
+) u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -47,4 +53,10 @@ export fn readfile(path: str, dest: []u8) size = {
 	const p = *(&path: *shdr);
 	const d = *(&dest: *shdr);
 	return sys_read(p.data, p.length, d.data, d.length): size;
+};
+
+export fn writefile(path: str, data: []u8) size = {
+	const p = *(&path: *shdr);
+	const d = *(&data: *shdr);
+	return sys_writefile(p.data, p.length, d.data, d.length): size;
 };

@@ -28,6 +28,22 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 
+	if (rt::strcmp(a, "/cons")) {
+		const s: str = "written through /dev/cons\n";
+		_ = rt::writefile("/dev/cons", *(&s: *[]u8));
+		return;
+	};
+
+	if (rt::strcmp(a, "/note")) {
+		const s: str = "a note from a user process\n";
+		_ = rt::writefile("/dev/note", *(&s: *[]u8));
+		let out: [256]u8 = [0...];
+		const k = rt::readfile("/dev/note", out[..]);
+		rt::print("note: ");
+		rt::write(out[..k]);
+		return;
+	};
+
 	let buf: [256]u8 = [0...];
 	const n = rt::readfile(a, buf[..]);
 	if (n == 0) {

@@ -1,13 +1,13 @@
 use arch;
 use console;
 use fs;
-use mem;
 use sched;
 
 export def EXIT: u64 = 0;
 export def WRITE: u64 = 1;
 export def READFILE: u64 = 2;
 export def ALLOC: u64 = 3;
+export def WRITEFILE: u64 = 4;
 
 type raw = struct {
 	data: *[*]u8,
@@ -42,6 +42,13 @@ fn readfile(regs: *arch::registers) u64 = {
 	return n: u64;
 };
 
+fn writefile(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	const data = asstr(regs.rdx: uintptr, regs.rcx: size);
+	const b = *(&data: *[]u8);
+	return fs::write_file(path, b): u64;
+};
+
 fn handle(regs: *arch::registers) uintptr = {
 	switch (regs.rax) {
 	case EXIT =>
@@ -56,6 +63,9 @@ fn handle(regs: *arch::registers) uintptr = {
 		return regs: uintptr;
 	case ALLOC =>
 		regs.rax = sched::user_alloc(regs.rdi);
+		return regs: uintptr;
+	case WRITEFILE =>
+		regs.rax = writefile(regs);
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

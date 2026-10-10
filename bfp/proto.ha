@@ -13,6 +13,8 @@ export def TREAD: u8 = 10;
 export def RREAD: u8 = 11;
 export def TCLUNK: u8 = 12;
 export def RCLUNK: u8 = 13;
+export def TWRITE: u8 = 14;
+export def RWRITE: u8 = 15;
 
 export def NOTAG: u16 = 0xFFFF;
 export def NOHANDLE: u32 = 0xFFFFFFFF;

@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, ls, cat, mem, frames, uptime, bfp, heap, spawn, threads, user [path], fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, write, mem, frames, uptime, bfp, heap, spawn, threads, user [path], fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -60,6 +60,8 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		list(*(&line[3..]: *str));
 	} else if (prefix(line, "cat ")) {
 		cat(*(&line[4..]: *str));
+	} else if (prefix(line, "write ")) {
+		write_cmd(*(&line[6..]: *str));
 	} else if (eq(line, "bfp")) {
 		bfp_demo();
 	} else if (eq(line, "heap")) {
@@ -121,6 +123,27 @@ fn cat(path: str) void = {
 		return;
 	};
 	console::write(data);
+};
+
+fn write_cmd(args: str) void = {
+	const b = *(&args: *[]u8);
+	let sp = 0z;
+	for (let i = 0z; i < len(b); i += 1) {
+		if (b[i] == (' ': u8)) {
+			sp = i;
+			break;
+		};
+	};
+	if (sp == 0) {
+		console::println("usage: write <path> <text>");
+		return;
+	};
+	const path = *(&b[0..sp]: *str);
+	const data = *(&b[sp + 1..]: *str);
+	const n = fs::write_file(path, *(&data: *[]u8));
+	console::print("wrote ");
+	console::printnum(n: u64);
+	console::println(" bytes");
 };
 
 fn bfp_demo() void = {

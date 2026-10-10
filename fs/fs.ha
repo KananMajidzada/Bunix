@@ -1,5 +1,6 @@
 use arch;
 use bfp;
+use console;
 use mem;
 use sched;
 use sys;
@@ -17,6 +18,10 @@ export type node = struct {
 	children: [MAXCHILD]size,
 	content: str,
 	gen: nullable *fn(buf: []u8) size,
+	writable: bool,
+	wdev: nullable *fn(buf: []u8) size,
+	wlen: size,
+	wbuf: [BUFSZ]u8,
 };
 
 type slot = struct {
@@ -30,7 +35,8 @@ type server = struct {
 
 let nodes: [MAXNODE]node = [node {
 	name = "", isdir = false, nchild = 0, children = [0...],
-	content = "", gen = null,
+	content = "", gen = null, writable = false, wdev = null,
+	wlen = 0, wbuf = [0...],
 }...];
 let nnodes: size = 0;
 let root: size = 0;
@@ -47,7 +53,8 @@ fn mknode(name: str, isdir: bool) size = {
 	const id = nnodes;
 	nodes[id] = node {
 		name = name, isdir = isdir, nchild = 0, children = [0...],
-		content = "", gen = null,
+		content = "", gen = null, writable = false, wdev = null,
+		wlen = 0, wbuf = [0...],
 	};
 	nnodes += 1;
 	return id;
@@ -135,6 +142,14 @@ export fn init() void = {
 	link(root, hello);
 
 	link(dev, mknode("null", false));
+
+	const cons = mknode("cons", false);
+	nodes[cons].wdev = &console::write;
+	link(dev, cons);
+
+	const note = mknode("note", false);
+	nodes[note].writable = true;
+	link(dev, note);
 
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
@@ -248,6 +263,8 @@ fn do_read(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 	let data: []u8 = [];
 	if (nodes[id].isdir) {
 		data = listdir(id);
+	} else if (nodes[id].writable) {
+		data = nodes[id].wbuf[..nodes[id].wlen];
 	} else {
 		match (nodes[id].gen) {
 		case null =>
@@ -268,6 +285,36 @@ fn do_read(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 fn do_clunk(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	s.handles[fid: size].inuse = false;
+};
+
+fn do_write(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+	const fid = bfp::r_u32(r);
+	const off = bfp::r_u64(r): size;
+	const data = bfp::r_bytes(r);
+	const id = s.handles[fid: size].node;
+	match (nodes[id].wdev) {
+	case null => void;
+	case let f: *fn(buf: []u8) size =>
+		_ = f(data);
+		bfp::w_u32(w, len(data): u32);
+		return;
+	};
+	if (!nodes[id].writable || off >= BUFSZ) {
+		bfp::w_u32(w, 0);
+		return;
+	};
+	const nd = &nodes[id];
+	let n = len(data);
+	if (off + n > BUFSZ) {
+		n = BUFSZ - off;
+	};
+	for (let i = 0z; i < n; i += 1) {
+		nd.wbuf[off + i] = data[i];
+	};
+	if (off + n > nd.wlen) {
+		nd.wlen = off + n;
+	};
+	bfp::w_u32(w, n: u32);
 };
 
 fn do_error(w: *bfp::writer, tag: u16) void = {
@@ -292,6 +339,8 @@ fn handle(s: *server, in: []u8, out: []u8) size = {
 		do_open(s, &w, &r);
 	case bfp::TREAD =>
 		do_read(s, &w, &r);
+	case bfp::TWRITE =>
+		do_write(s, &w, &r);
 	case bfp::TCLUNK =>
 		do_clunk(s, &w, &r);
 	case =>
@@ -393,4 +442,35 @@ export fn cat(path: str) []u8 = {
 		return filebuf[..0];
 	};
 	return read_all(fid);
+};
+
+export fn write_file(path: str, data: []u8) size = {
+	const p = *(&path: *[]u8);
+	const fid = walkpath(p);
+	if (fid == bfp::NOHANDLE) {
+		return 0;
+	};
+
+	let w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TOPEN, 5);
+	bfp::w_u32(&w, fid);
+	bfp::w_u8(&w, 1);
+	_ = send(&w);
+
+	w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TWRITE, 6);
+	bfp::w_u32(&w, fid);
+	bfp::w_u64(&w, 0);
+	bfp::w_u16(&w, len(data): u16);
+	bfp::w_bytes(&w, data);
+	const resp = send(&w);
+	let r = bfp::reader { buf = resp, off = bfp::HDR };
+	const n = bfp::r_u32(&r): size;
+
+	w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TCLUNK, 7);
+	bfp::w_u32(&w, fid);
+	_ = send(&w);
+
+	return n;
 };
