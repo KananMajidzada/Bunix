@@ -42,4 +42,6 @@ SECTIONS {
 		*(COMMON)
 		PROVIDE_HIDDEN(__bss_end = .);
 	}
+
+	__image_end = .;
 }

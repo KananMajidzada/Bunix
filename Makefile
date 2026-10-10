@@ -32,9 +32,10 @@ build/prog.bin: build/userprog
 user/blob.ha: build/prog.bin
 	@{ n=$$(wc -c < build/prog.bin); \
 	   e=$$(nm build/userprog | awk '$$3 == "_start" { print $$1 }'); \
+	   x=$$(nm build/userprog | awk '$$3 == "__image_end" { print $$1 }'); \
 	   printf 'export const prog: [%s]u8 = [' "$$n"; \
 	   od -An -tu1 -v build/prog.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
-	   printf '];\nexport const entry: u64 = 0x%s;\n' "$$e"; } > $@
+	   printf '];\nexport const entry: u64 = 0x%s;\nexport const image_end: u64 = 0x%s;\n' "$$e" "$$x"; } > $@
 
 run: bunix.bin
 	$(QEMU) -m 256 -kernel bunix.bin -serial stdio

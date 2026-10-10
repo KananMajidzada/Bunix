@@ -10,3 +10,6 @@ export fn io_wait() void;
 export fn probe(addr: uintptr) u8;
 export fn pause() void;
 export fn ltr(sel: u16) void;
+export fn read_cr3() uintptr;
+export fn write_cr3(space: uintptr) void;
+export fn invlpg(addr: uintptr) void;

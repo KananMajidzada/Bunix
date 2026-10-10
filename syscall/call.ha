@@ -55,7 +55,7 @@ fn handle(regs: *arch::registers) uintptr = {
 		regs.rax = readfile(regs);
 		return regs: uintptr;
 	case ALLOC =>
-		regs.rax = mem::frames_alloc(regs.rdi): u64;
+		regs.rax = sched::user_alloc(regs.rdi);
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

@@ -63,3 +63,18 @@ arch.ltr:
 	movw %di, %ax
 	ltr %ax
 	ret
+
+.global arch.read_cr3
+arch.read_cr3:
+	movq %cr3, %rax
+	ret
+
+.global arch.write_cr3
+arch.write_cr3:
+	movq %rdi, %cr3
+	ret
+
+.global arch.invlpg
+arch.invlpg:
+	invlpg (%rdi)
+	ret

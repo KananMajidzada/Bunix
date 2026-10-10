@@ -4,7 +4,7 @@ use rt;
 
 export def SYSCALL: size = 128;
 
-export let fault_hook: nullable *fn(regs: *registers) void = null;
+export let fault_hook: nullable *fn(regs: *registers) uintptr = null;
 export let irq_hook: nullable *fn(vec: u64) void = null;
 
 // Register save area built on the stack by isr_common, in push order.
@@ -65,12 +65,16 @@ export fn idt_init() void = {
 export fn isr_handler(regs: *registers) uintptr = {
 	const v = regs.vector;
 	if (v < 32) {
+		let frame: uintptr = 0;
 		match (fault_hook) {
 		case null => void;
-		case let f: *fn(regs: *registers) void =>
-			f(regs);
+		case let f: *fn(regs: *registers) uintptr =>
+			frame = f(regs);
 		};
-		rt::halt();
+		if (frame == 0) {
+			rt::halt();
+		};
+		return frame;
 	} else if (v == 0xFF) {
 		rt::halt();
 	} else if (v == (SYSCALL: u64)) {

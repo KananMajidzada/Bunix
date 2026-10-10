@@ -4,13 +4,14 @@ use console;
 use fs;
 use loader;
 use mem;
+use paging;
 use rt;
 use sched;
 use shell;
 use sys;
 use syscall;
 
-fn on_fault(regs: *arch::registers) void = {
+fn on_fault(regs: *arch::registers) uintptr = {
 	console::print("\nexception ");
 	console::printnum(regs.vector);
 	console::print(" error ");
@@ -18,7 +19,11 @@ fn on_fault(regs: *arch::registers) void = {
 	console::print(" at ");
 	console::printnum(regs.rip);
 	console::putc('\n');
-	rt::halt();
+	if ((regs.cs & 3) == 3) {
+		console::println("killing user process");
+		return sched::fault_kill();
+	};
+	return 0;
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {
@@ -51,6 +56,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 
 	mem::init(mb);
 	loader::reserve();
+	paging::init();
 	fs::init();
 	console::print("frames:    ");
 	console::printnum(mem::free_frames());
