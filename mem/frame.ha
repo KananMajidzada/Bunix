@@ -86,6 +86,32 @@ export fn frame_alloc() uintptr = {
 	return 0;
 };
 
+// Allocates count contiguous frames and returns the physical base, or zero.
+export fn frames_alloc(count: u64) uintptr = {
+	if (count == 0) {
+		return 0;
+	};
+	let run = 0u64;
+	let start = 0u64;
+	for (let i = 0u64; i < nframes; i += 1) {
+		if (test(i)) {
+			run = 0;
+			continue;
+		};
+		if (run == 0) {
+			start = i;
+		};
+		run += 1;
+		if (run == count) {
+			for (let j = start; j < start + count; j += 1) {
+				set(j);
+			};
+			return (start * (PAGE: u64)): uintptr;
+		};
+	};
+	return 0;
+};
+
 export fn release(addr: uintptr) void = {
 	clear((addr / PAGE): u64);
 };

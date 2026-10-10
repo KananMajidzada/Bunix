@@ -27,7 +27,7 @@ COM1.
 
 | Path        | Contents                                        |
 |-------------|-------------------------------------------------|
-| `rt/`       | Freestanding Hare runtime: entry, memory ops    |
+| `rt/`       | Freestanding Hare runtime: entry, memory ops, heap |
 | `debug/`    | Placeholder module the build driver expects     |
 | `arch/`     | x86_64 CPU, port, interrupt, PIC, timer code    |
 | `boot/`     | Multiboot information parsing                   |
@@ -44,10 +44,12 @@ Multiboot memory map, manages physical frames with a bitmap, and runs a
 PIT-driven clock behind an interrupt descriptor table. A small command loop is
 available on the console:
 
-	echo clear frames fault halt help mem uptime 9p
+	echo clear frames fault halt heap help mem uptime 9p
 
 The `9p` command runs a full version/attach/walk/open/read/clunk exchange
-against an in-memory file server, so the 9P layer is exercised end to end.
+against an in-memory file server, so the 9P layer is exercised end to end. The
+`heap` command builds a string with `append`, which drives the runtime
+allocator the compiler lowers the built-ins to.
 
 ![boot](doc/boot.png)
 

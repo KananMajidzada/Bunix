@@ -53,7 +53,8 @@ consistent everywhere:
 ## Status
 
 Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
-physical frame allocator, and timer interrupts with an IDT.
+physical frame allocator, timer interrupts with an IDT, a runtime heap, and a
+first cut of 9P.
 
 Next: a scheduler and kernel threads, then a first userspace process.
 
@@ -62,6 +63,6 @@ Next: a scheduler and kernel threads, then a first userspace process.
 1. Console, memory map, and a physical page allocator. [done]
 2. Interrupts, a timer, and a scheduler. [interrupts and timer done]
 3. Kernel threads and a first userspace process.
-4. A 9P server core and a per-process namespace.
+4. A 9P server core and a per-process namespace. [wire format and a toy server done]
 5. `/dev`, `/proc`, and an init process.
 6. The port environment: a POSIX library, a shell, and a C compiler driver.

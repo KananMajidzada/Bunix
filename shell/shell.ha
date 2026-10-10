@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, echo, clear, mem, frames, uptime, 9p, fault, halt");
+		console::println("commands: help, echo, clear, mem, frames, uptime, 9p, heap, fault, halt");
 	} else if (prefix(line, "echo ")) {
 		console::write(line[len("echo ")..]);
 		console::putc('\n': u8);
@@ -55,6 +55,8 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		const data = ninep::slurp(&srv, "hello");
 		console::print("9p: ");
 		console::write(data);
+	} else if (eq(line, "heap")) {
+		heap_demo();
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
@@ -92,4 +94,20 @@ fn prefix(line: []u8, s: str) bool = {
 	};
 	let a = *(&line[..len(s)]: *str);
 	return a == s;
+};
+
+// Builds a string on the heap with append, which drives the allocator, then
+// releases it.
+fn heap_demo() void = {
+	let b: []u8 = [];
+	for (let i = 0; i < 26; i += 1) {
+		append(b, (97 + i): u8)!;
+	};
+	console::print("heap: ");
+	console::write(b);
+	console::putc('\n');
+	console::print("length: ");
+	console::printnum(len(b));
+	console::putc('\n');
+	free(b);
 };
