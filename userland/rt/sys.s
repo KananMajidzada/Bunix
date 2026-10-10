@@ -23,3 +23,12 @@ rt.sys_alloc:
 	movq $3, %rax
 	int $0x80
 	ret
+
+.data
+.align 8
+.global rt.arg_ptr
+rt.arg_ptr:
+	.quad 0
+.global rt.arg_len
+rt.arg_len:
+	.quad 0

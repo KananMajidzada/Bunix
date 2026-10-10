@@ -13,6 +13,17 @@ type shdr = struct {
 	dlen: size,
 ) u64;
 @symbol("rt.sys_alloc") fn sys_alloc(pages: u64) uintptr;
+@symbol("rt.arg_ptr") let arg_ptr: u64;
+@symbol("rt.arg_len") let arg_len: u64;
+
+export fn arg() str = {
+	let h = shdr {
+		data = arg_ptr: uintptr,
+		length = arg_len: size,
+		capacity = arg_len: size,
+	};
+	return *(&h: *str);
+};
 
 export fn write(buf: []u8) void = {
 	const h = *(&buf: *shdr);

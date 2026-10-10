@@ -108,7 +108,12 @@ export fn spawn(entry: *fn(arg: uintptr) void, arg: uintptr) bool = {
 	return true;
 };
 
-export fn spawn_user(entry: uintptr, ustack: uintptr) size = {
+export fn spawn_user(
+	entry: uintptr,
+	ustack: uintptr,
+	argptr: uintptr,
+	arglen: size,
+) size = {
 	const id = free_slot();
 	if (id == NOID) {
 		return NOID;
@@ -120,7 +125,8 @@ export fn spawn_user(entry: uintptr, ustack: uintptr) size = {
 	const top = stack + ((STACK_PAGES * 4096): uintptr);
 	const fp = top - FRAME;
 	blank(fp);
-	put(fp, 72, 0);
+	put(fp, 72, argptr: u64);
+	put(fp, 80, arglen: u64);
 	put(fp, 136, entry);
 	put(fp, 144, RING3_CODE);
 	put(fp, 152, 0x202);

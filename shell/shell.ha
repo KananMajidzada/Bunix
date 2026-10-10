@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, ls, cat, mem, frames, uptime, bfp, heap, spawn, threads, user, fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, mem, frames, uptime, bfp, heap, spawn, threads, user [path], fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -69,7 +69,9 @@ fn exec(mem_mib: u64, line: []u8) void = {
 	} else if (eq(line, "threads")) {
 		show_threads();
 	} else if (eq(line, "user")) {
-		run_user();
+		run_user("/proc/version");
+	} else if (prefix(line, "user ")) {
+		run_user(*(&line[5..]: *str));
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
@@ -189,8 +191,8 @@ fn show_threads() void = {
 	};
 };
 
-fn run_user() void = {
-	const id = loader::run();
+fn run_user(path: str) void = {
+	const id = loader::run(path);
 	if (id == sched::NOID) {
 		console::println("could not start the user process");
 		return;

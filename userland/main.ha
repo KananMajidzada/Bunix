@@ -1,21 +1,18 @@
 use rt;
 
 export @symbol("main") fn main() void = {
-	rt::println("hello from a Hare user program");
-
-	let buf: [128]u8 = [0...];
-	const n = rt::readfile("/proc/version", buf[..]);
-	rt::print("version: ");
-	rt::write(buf[..n]);
-
-	const s: str = "heap works";
-	const msg = *(&s: *[]u8);
-	let built: []u8 = [];
-	for (let i = 0z; i < len(msg); i += 1) {
-		append(built, msg[i])!;
+	const a = rt::arg();
+	if (len(a) == 0) {
+		rt::println("usage: cat <path>");
+		return;
 	};
-	rt::print("heap: ");
-	rt::write(built);
-	rt::println("");
-	free(built);
+
+	let buf: [256]u8 = [0...];
+	const n = rt::readfile(a, buf[..]);
+	if (n == 0) {
+		rt::print("cat: cannot read ");
+		rt::println(a);
+		return;
+	};
+	rt::write(buf[..n]);
 };
