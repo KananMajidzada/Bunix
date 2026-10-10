@@ -50,10 +50,17 @@ consistent everywhere:
 - One idea per module. The kernel talks to hardware through `arch`, learns
   where it is from `boot`, and speaks to the operator through `console`.
 
+## Status
+
+Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
+physical frame allocator, and timer interrupts with an IDT.
+
+Next: a scheduler and kernel threads, then a first userspace process.
+
 ## Roadmap
 
-1. Console, memory map, and a physical page allocator.
-2. Interrupts, a timer, and a scheduler.
+1. Console, memory map, and a physical page allocator. [done]
+2. Interrupts, a timer, and a scheduler. [interrupts and timer done]
 3. Kernel threads and a first userspace process.
 4. A 9P server core and a per-process namespace.
 5. `/dev`, `/proc`, and an init process.

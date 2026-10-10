@@ -29,12 +29,23 @@ COM1.
 |-------------|-------------------------------------------------|
 | `rt/`       | Freestanding Hare runtime: entry, memory ops    |
 | `debug/`    | Placeholder module the build driver expects     |
-| `arch/`     | x86_64 CPU and port primitives                  |
+| `arch/`     | x86_64 CPU, port, interrupt, PIC, timer code    |
 | `boot/`     | Multiboot information parsing                   |
-| `console/`  | Serial and VGA text console                     |
+| `mem/`      | Physical frame allocator                        |
+| `console/`  | Serial, VGA text, and keyboard                  |
+| `shell/`    | Console command loop                            |
 | `main.ha`   | Kernel entry point                              |
 
 ## Status
 
-Early bring-up: the kernel enters long mode, sets up a stack, and reports the
-memory map. See `DESIGN.md` for where it is going.
+The kernel enters long mode, brings up the serial and VGA consoles, reads the
+Multiboot memory map, manages physical frames with a bitmap, and runs a
+PIT-driven clock behind an interrupt descriptor table. A small command loop is
+available on the console:
+
+	echo clear frames fault halt help mem uptime
+
+![boot](doc/boot.png)
+
+There are no processes, no filesystem, and no 9P yet. See `DESIGN.md` for where
+it is going.

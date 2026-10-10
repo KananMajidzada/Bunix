@@ -24,6 +24,10 @@ export fn println(s: str) void = {
 	putc('\n': u8);
 };
 
+export fn clear() void = {
+	vga_clear();
+};
+
 export fn printnum(n: u64) void = {
 	let buf: [20]u8 = [0...];
 	let i = len(buf);

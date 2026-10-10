@@ -37,3 +37,18 @@ arch.cli:
 arch.sti:
 	sti
 	ret
+
+/* A short delay by writing to the unused port 0x80. */
+.global arch.io_wait
+arch.io_wait:
+	xorl %eax, %eax
+	movw $0x80, %dx
+	outb %al, %dx
+	ret
+
+/* Read one byte, used to provoke a fault on an unmapped address. */
+.global arch.probe
+arch.probe:
+	movq %rdi, %rax
+	movb (%rax), %al
+	ret

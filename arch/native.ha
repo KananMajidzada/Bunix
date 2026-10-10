@@ -6,3 +6,5 @@ export fn outw(port: u16, val: u16) void;
 export fn inw(port: u16) u16;
 export fn cli() void;
 export fn sti() void;
+export fn io_wait() void;
+export fn probe(addr: uintptr) u8;

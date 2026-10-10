@@ -1,4 +1,6 @@
+use arch;
 use console;
+use mem;
 use rt;
 
 // A placeholder command loop. The real shell will be a 9P client; for now this
@@ -41,11 +43,27 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, mem, halt");
+		console::println("commands: help, echo, clear, mem, frames, uptime, fault, halt");
+	} else if (prefix(line, "echo ")) {
+		console::write(line[len("echo ")..]);
+		console::putc('\n': u8);
+	} else if (eq(line, "clear")) {
+		console::clear();
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
 		console::println(" MiB");
+	} else if (eq(line, "frames")) {
+		console::printnum(mem::free_frames());
+		console::print(" free of ");
+		console::printnum(mem::total_frames());
+		console::println(" frames");
+	} else if (eq(line, "uptime")) {
+		console::printnum(arch::seconds());
+		console::println(" s");
+	} else if (eq(line, "fault")) {
+		console::println("touching an unmapped address");
+		_ = arch::probe(0x100000000);
 	} else if (eq(line, "halt")) {
 		rt::halt();
 	} else {
@@ -59,5 +77,13 @@ fn exec(mem_mib: u64, line: []u8) void = {
 // string; the equality then goes through rt::strcmp.
 fn eq(line: []u8, s: str) bool = {
 	let a = *(&line: *str);
+	return a == s;
+};
+
+fn prefix(line: []u8, s: str) bool = {
+	if (len(line) < len(s)) {
+		return false;
+	};
+	let a = *(&line[..len(s)]: *str);
 	return a == s;
 };

@@ -21,7 +21,10 @@ export fn vga_init() void = {
 	arch::outb(0x3C9, 0x3F);
 	arch::outb(0x3C9, 0x3F);
 	arch::outb(0x3C9, 0x3F);
+	vga_clear();
+};
 
+export fn vga_clear() void = {
 	for (let y = 0z; y < ROWS; y += 1) {
 		for (let x = 0z; x < COLS; x += 1) {
 			*cell(y, x) = ATTR | (' ': u16);
