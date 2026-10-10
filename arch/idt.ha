@@ -19,6 +19,8 @@ export type registers = struct {
 	rip: u64, cs: u64, rflags: u64, rsp: u64, ss: u64,
 };
 
+export let sched_hook: nullable *fn(regs: *registers) uintptr = null;
+
 type gate = struct @packed {
 	off_low: u16,
 	sel: u16,
@@ -61,7 +63,7 @@ export fn idt_init() void = {
 	load_idt(&p);
 };
 
-export fn isr_handler(regs: *registers) void = {
+export fn isr_handler(regs: *registers) uintptr = {
 	const v = regs.vector;
 	if (v < 32) {
 		match (fault_hook) {
@@ -85,5 +87,19 @@ export fn isr_handler(regs: *registers) void = {
 			outb(0xA0, 0x20);
 		};
 		outb(0x20, 0x20);
+		if (v == 32) {
+			return reschedule(regs);
+		};
 	};
+	return regs: uintptr;
+};
+
+fn reschedule(regs: *registers) uintptr = {
+	let frame = regs: uintptr;
+	match (sched_hook) {
+	case null => void;
+	case let f: *fn(regs: *registers) uintptr =>
+		frame = f(regs);
+	};
+	return frame;
 };

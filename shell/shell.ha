@@ -3,6 +3,7 @@ use bfp;
 use console;
 use mem;
 use rt;
+use sched;
 use sys;
 
 // A placeholder command loop. The real shell will be a BFP client; for now this
@@ -45,7 +46,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, mem, frames, uptime, bfp, heap, fault, halt");
+		console::println("commands: help, version, echo, clear, mem, frames, uptime, bfp, heap, spawn, threads, fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -62,6 +63,10 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		console::write(data);
 	} else if (eq(line, "heap")) {
 		heap_demo();
+	} else if (eq(line, "spawn")) {
+		spawn_workers();
+	} else if (eq(line, "threads")) {
+		show_threads();
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
@@ -115,4 +120,49 @@ fn heap_demo() void = {
 	console::printnum(len(b));
 	console::putc('\n');
 	free(b);
+};
+
+def NWORKERS: size = 4;
+
+let counters: [NWORKERS]u64 = [0...];
+let spawned: bool = false;
+
+fn worker(arg: uintptr) void = {
+	const i = arg: size;
+	for (true) {
+		counters[i] += 1;
+		arch::pause();
+	};
+};
+
+fn spawn_workers() void = {
+	if (spawned) {
+		console::println("workers already running");
+		return;
+	};
+	let ok = true;
+	for (let i = 0z; i < NWORKERS; i += 1) {
+		if (!sched::spawn(&worker, i: uintptr)) {
+			ok = false;
+		};
+	};
+	spawned = ok;
+	if (ok) {
+		console::println("started four worker threads");
+	} else {
+		console::println("could not start every worker");
+	};
+};
+
+fn show_threads() void = {
+	console::print("threads: ");
+	console::printnum(sched::count());
+	console::putc('\n');
+	for (let i = 0z; i < NWORKERS; i += 1) {
+		console::print("worker ");
+		console::printnum(i);
+		console::print(": ");
+		console::printnum(counters[i]);
+		console::putc('\n');
+	};
 };

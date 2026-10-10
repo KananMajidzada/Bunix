@@ -94,10 +94,9 @@ isr_common:
 	pushq %r15
 	cld
 	movq %rsp, %rdi
-	movq %rsp, %rbx
 	andq $-16, %rsp
 	call arch.isr_handler
-	movq %rbx, %rsp
+	movq %rax, %rsp
 	popq %r15
 	popq %r14
 	popq %r13

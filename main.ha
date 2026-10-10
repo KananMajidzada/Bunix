@@ -3,6 +3,7 @@ use boot;
 use console;
 use mem;
 use rt;
+use sched;
 use shell;
 use sys;
 
@@ -61,6 +62,8 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	arch::pic_remap();
 	arch::timer_init();
 	arch::pic_unmask(0);
+	sched::start();
+	arch::sched_hook = &sched::tick;
 	arch::sti();
 
 	console::println("");

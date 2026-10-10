@@ -52,3 +52,8 @@ arch.probe:
 	movq %rdi, %rax
 	movb (%rax), %al
 	ret
+
+.global arch.pause
+arch.pause:
+	pause
+	ret

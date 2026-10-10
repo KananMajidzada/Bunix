@@ -8,3 +8,4 @@ export fn cli() void;
 export fn sti() void;
 export fn io_wait() void;
 export fn probe(addr: uintptr) u8;
+export fn pause() void;
