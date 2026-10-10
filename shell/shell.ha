@@ -20,6 +20,16 @@ export fn run(mem_mib: u64) never = {
 	};
 };
 
+export fn monitor(id: size) never = {
+	for (true) {
+		if (!sched::alive(id)) {
+			console::println("init exited, restarting");
+			id = loader::run("/sh");
+		};
+		arch::pause();
+	};
+};
+
 fn readline(buf: []u8) size = {
 	let n = 0z;
 	for (true) {

@@ -58,7 +58,7 @@ export @symbol("main") fn main() void = {
 	};
 
 	if (rt::strcmp(a, "/sh")) {
-		rt::println("bunix user shell, type 'exit'");
+		rt::println("bunix user shell, type 'help'");
 		for (true) {
 			rt::print("ush> ");
 			let lb: [128]u8 = [0...];
@@ -83,19 +83,87 @@ export @symbol("main") fn main() void = {
 				};
 			};
 			const line = *(&lb[..n]: *[]u8);
-			if (str_eq(line, "exit")) {
-				rt::println("bye");
-				break;
-			};
 			if (len(line) == 0) {
 				continue;
 			};
-			if (starts2(line, "cat ")) {
-				run_cat(line[4..]);
-			} else if (starts2(line, "ls ")) {
-				run_cat(line[3..]);
+			const sp = first_space(line);
+			const cmd = line[..sp];
+			const rest = if (sp < len(line)) line[sp + 1..] else line[..0];
+			if (str_eq(cmd, "exit")) {
+				rt::println("bye");
+				break;
+			} else if (str_eq(cmd, "help")) {
+				rt::println("cat ls echo write mkdir touch rm user multi halt version exit");
+			} else if (str_eq(cmd, "version")) {
+				const vp: str = "/proc/version";
+				run_cat(*(&vp: *[]u8));
+			} else if (str_eq(cmd, "echo")) {
+				rt::write(rest);
+				rt::println("");
+			} else if (str_eq(cmd, "ls")) {
+				const rootpath: str = "/";
+				run_cat(if (len(rest) == 0) *(&rootpath: *[]u8) else rest);
+			} else if (str_eq(cmd, "cat")) {
+				run_cat(rest);
+			} else if (str_eq(cmd, "write")) {
+				const w = first_space(rest);
+				if (w == len(rest)) {
+					rt::println("usage: write <path> <text>");
+				} else {
+					const k = rt::writefile(*(&rest[..w]: *str), rest[w + 1..]);
+					rt::print("wrote ");
+					rt::printnum(k: u64);
+					rt::println(" bytes");
+				};
+			} else if (str_eq(cmd, "mkdir")) {
+				report(rt::mkdir(*(&rest: *str)), "created", "cannot create");
+			} else if (str_eq(cmd, "touch")) {
+				report(rt::create(*(&rest: *str)), "created", "cannot create");
+			} else if (str_eq(cmd, "rm")) {
+				report(rt::remove(*(&rest: *str)), "removed", "cannot remove");
+			} else if (str_eq(cmd, "user")) {
+				const pid = rt::spawn(*(&rest: *str));
+				if (pid == ~0u64) {
+					rt::println("cannot spawn");
+				} else {
+					for (rt::alive(pid)) {
+						rt::cop();
+					};
+					rt::println("user process exited");
+				};
+			} else if (str_eq(cmd, "multi")) {
+				let ids: [3]u64 = [0u64, 0u64, 0u64];
+				for (let i = 0z; i < 3; i += 1) {
+					let arg: [8]u8 = [0...];
+					arg[0] = '/': u8;
+					arg[1] = 's': u8;
+					arg[2] = 'p': u8;
+					arg[3] = 'i': u8;
+					arg[4] = 'n': u8;
+					arg[5] = ' ': u8;
+					arg[6] = ('1': u8) + (i: u8);
+					const s = *(&arg[..7]: *str);
+					ids[i] = rt::spawn(s);
+				};
+				for (true) {
+					let live = false;
+					for (let i = 0z; i < 3; i += 1) {
+						if (rt::alive(ids[i])) {
+							live = true;
+						};
+					};
+					if (!live) {
+						break;
+					};
+					rt::cop();
+				};
+				rt::println("all user processes exited");
+			} else if (str_eq(cmd, "halt")) {
+				rt::print("halting. ");
+				rt::haltsys();
 			} else {
-				run_cat(line);
+				rt::print("unknown command: ");
+				rt::println(*(&cmd: *str));
 			};
 		};
 		return;
@@ -125,17 +193,21 @@ fn starts(s: str, p: str) bool = {
 	return true;
 };
 
-fn starts2(b: []u8, p: str) bool = {
-	const pb = *(&p: *[]u8);
-	if (len(b) < len(pb)) {
-		return false;
-	};
-	for (let i = 0z; i < len(pb); i += 1) {
-		if (b[i] != pb[i]) {
-			return false;
+fn first_space(b: []u8) size = {
+	for (let i = 0z; i < len(b); i += 1) {
+		if (b[i] == (' ': u8)) {
+			return i;
 		};
 	};
-	return true;
+	return len(b);
+};
+
+fn report(ok: bool, yes: str, no: str) void = {
+	if (ok) {
+		rt::println(yes);
+	} else {
+		rt::println(no);
+	};
 };
 
 fn str_eq(b: []u8, s: str) bool = {

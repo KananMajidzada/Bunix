@@ -1,6 +1,8 @@
 use arch;
 use console;
 use fs;
+use loader;
+use rt;
 use sched;
 
 export def EXIT: u64 = 0;
@@ -10,6 +12,11 @@ export def ALLOC: u64 = 3;
 export def WRITEFILE: u64 = 4;
 export def READCHR: u64 = 5;
 export def YIELD: u64 = 6;
+export def CREATE: u64 = 7;
+export def REMOVE: u64 = 8;
+export def HALT: u64 = 9;
+export def SPAWN: u64 = 10;
+export def ALIVE: u64 = 11;
 
 type raw = struct {
 	data: *[*]u8,
@@ -51,6 +58,21 @@ fn writefile(regs: *arch::registers) u64 = {
 	return fs::write_file(path, b): u64;
 };
 
+fn createpath(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	return if (fs::create(path, regs.rdx != 0)) 1 else 0;
+};
+
+fn removepath(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	return if (fs::remove(path)) 1 else 0;
+};
+
+fn spawnpath(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	return loader::run(path): u64;
+};
+
 fn handle(regs: *arch::registers) uintptr = {
 	switch (regs.rax) {
 	case EXIT =>
@@ -75,6 +97,20 @@ fn handle(regs: *arch::registers) uintptr = {
 	case YIELD =>
 		regs.rax = 0;
 		return sched::tick(regs);
+	case CREATE =>
+		regs.rax = createpath(regs);
+		return regs: uintptr;
+	case REMOVE =>
+		regs.rax = removepath(regs);
+		return regs: uintptr;
+	case HALT =>
+		rt::halt();
+	case SPAWN =>
+		regs.rax = spawnpath(regs);
+		return regs: uintptr;
+	case ALIVE =>
+		regs.rax = if (sched::alive(regs.rdi: size)) 1 else 0;
+		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;
 		return regs: uintptr;

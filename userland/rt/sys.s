@@ -42,6 +42,36 @@ rt.sys_yield:
 	int $0x80
 	ret
 
+.global rt.sys_create
+rt.sys_create:
+	movq $7, %rax
+	int $0x80
+	ret
+
+.global rt.sys_remove
+rt.sys_remove:
+	movq $8, %rax
+	int $0x80
+	ret
+
+.global rt.sys_halt
+rt.sys_halt:
+	movq $9, %rax
+	int $0x80
+1:	jmp 1b
+
+.global rt.sys_spawn
+rt.sys_spawn:
+	movq $10, %rax
+	int $0x80
+	ret
+
+.global rt.sys_alive
+rt.sys_alive:
+	movq $11, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

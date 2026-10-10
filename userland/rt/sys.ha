@@ -21,6 +21,11 @@ type shdr = struct {
 ) u64;
 @symbol("rt.sys_readchr") fn sys_readchr() u64;
 @symbol("rt.sys_yield") fn sys_yield() u64;
+@symbol("rt.sys_create") fn sys_create(pptr: uintptr, plen: size, isdir: u64) u64;
+@symbol("rt.sys_remove") fn sys_remove(pptr: uintptr, plen: size) u64;
+@symbol("rt.sys_halt") fn sys_halt() never;
+@symbol("rt.sys_spawn") fn sys_spawn(pptr: uintptr, plen: size) u64;
+@symbol("rt.sys_alive") fn sys_alive(id: u64) u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -93,4 +98,34 @@ export fn writefile(path: str, data: []u8) size = {
 	const p = *(&path: *shdr);
 	const d = *(&data: *shdr);
 	return sys_writefile(p.data, p.length, d.data, d.length): size;
+};
+
+export fn mkdir(path: str) bool = {
+	const p = *(&path: *shdr);
+	return sys_create(p.data, p.length, 1) != 0;
+};
+
+export fn create(path: str) bool = {
+	const p = *(&path: *shdr);
+	return sys_create(p.data, p.length, 0) != 0;
+};
+
+export fn remove(path: str) bool = {
+	const p = *(&path: *shdr);
+	return sys_remove(p.data, p.length) != 0;
+};
+
+export fn haltsys() never = sys_halt();
+
+export fn spawn(path: str) u64 = {
+	const p = *(&path: *shdr);
+	return sys_spawn(p.data, p.length);
+};
+
+export fn alive(id: u64) bool = {
+	return sys_alive(id) != 0;
+};
+
+export fn cop() void = {
+	_ = sys_yield();
 };

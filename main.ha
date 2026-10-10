@@ -76,6 +76,13 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	arch::sti();
 
 	console::println("");
-	console::println("type 'help' for commands.");
-	shell::run(mem_mib);
+	console::println("starting user init.");
+	syscall::init();
+	sched::start();
+	arch::sched_hook = &sched::tick;
+	arch::sti();
+
+	const init_id = loader::run("/sh");
+	console::println("");
+	shell::monitor(init_id);
 };
