@@ -1,0 +1,4 @@
+/bunix
+*.o
+.cache/
+.bin/
