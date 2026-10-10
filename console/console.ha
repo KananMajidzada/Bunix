@@ -1,6 +1,3 @@
-// Output goes to both the serial port and the VGA text buffer, so the kernel is
-// visible on screen and in a captured log at once.
-
 use rt;
 
 export fn putc(ch: u8) void = {
@@ -44,8 +41,6 @@ export fn printnum(n: u64) void = {
 	write(buf[i..]);
 };
 
-// Waits for a byte from either the serial port or the keyboard. The serial path
-// makes the kernel usable from a pipe; the keyboard path serves the console.
 export fn getch() u8 = {
 	for (true) {
 		if (serial_has_data()) {

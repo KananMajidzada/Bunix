@@ -1,14 +1,5 @@
 use mem;
 
-// The kernel heap. This is what makes the alloc, append, insert and delete
-// built-ins work: the compiler lowers them to malloc, ensure and free, and the
-// runtime here answers those calls.
-//
-// Blocks are served from a free list when one is big enough and from a bump
-// pointer over frames taken from the physical allocator otherwise. Freeing a
-// block puts it back on the list; neighbouring blocks are not merged, which is
-// fine at this stage and keeps the code small.
-
 // The slice header handed to ensure and unensure.
 export type slice = struct {
 	data: nullable *opaque,
@@ -98,8 +89,7 @@ export @symbol("rt.free") fn free_(p: nullable *opaque) void = {
 	free_head = addr;
 };
 
-// Grows or shrinks an allocation, preserving as much of the contents as the
-// two sizes share. The block header records the old usable size.
+// Grows or shrinks an allocation in place when it fits.
 fn realloc(p: nullable *opaque, n: size) nullable *opaque = {
 	const op = match (p) {
 	case null =>

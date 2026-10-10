@@ -1,9 +1,5 @@
 use rt;
 
-// Interrupt descriptor table and the C-level dispatcher the assembly stubs call
-// into. The code selector 0x08 is the ring 0 code segment set up by the boot
-// trampoline in rt/start.s.
-
 @symbol("arch.isr_stubs") const isr_stubs: [*]uintptr;
 
 export let fault_hook: nullable *fn(regs: *registers) void = null;

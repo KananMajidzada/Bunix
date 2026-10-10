@@ -4,8 +4,6 @@ def MEM: uintptr = 0xB8000;
 def COLS: size = 80;
 def ROWS: size = 25;
 
-// Black on white: attribute 0x70 is a black foreground on VGA color 7, which
-// the PAL here brightens from gray to white.
 def ATTR: u16 = 0x7000;
 
 let row: size = 0;
@@ -16,8 +14,6 @@ fn cell(y: size, x: size) *u16 = {
 };
 
 export fn vga_init() void = {
-	// VGA palette entry 7 is light gray by default. Brighten it to white so
-	// the background reads as white rather than the usual gray.
 	arch::outb(0x3C8, 7);
 	arch::outb(0x3C9, 0x3F);
 	arch::outb(0x3C9, 0x3F);

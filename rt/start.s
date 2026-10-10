@@ -1,11 +1,3 @@
-/* Bunix x86_64 entry.
- *
- * The boot loader hands us control in 32-bit protected mode with the Multiboot
- * magic in eax and the information pointer in ebx. We stash the pointer, build
- * a page table that identity maps the first gigabyte with 2 MiB pages, enable
- * long mode, and jump into the Hare runtime.
- */
-
 .section .multiboot, "a"
 .align 4
 multiboot_header:

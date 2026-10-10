@@ -7,7 +7,6 @@ use sched;
 use shell;
 use sys;
 
-// Prints the vector and error code of a CPU exception, then stops.
 fn on_fault(regs: *arch::registers) void = {
 	console::print("\nexception ");
 	console::printnum(regs.vector);
@@ -19,9 +18,6 @@ fn on_fault(regs: *arch::registers) void = {
 	rt::halt();
 };
 
-// Kernel entry. The runtime calls this once the CPU is in long mode and the
-// @init hooks have run; mbi is the physical address of the Multiboot
-// information, or zero if there was none.
 export @symbol("main") fn main(mbi: uintptr) void = {
 	console::print(sys::NAME);
 	console::print(" ");

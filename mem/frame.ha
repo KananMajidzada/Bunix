@@ -1,12 +1,5 @@
 use boot;
 
-// Physical frame allocator. A bitmap is placed just past the kernel image and
-// covers all of the memory the boot loader reported. Bit set means the frame is
-// in use.
-//
-// Identity mapping means a physical address doubles as the pointer we write
-// through, so this only works while the kernel stays in the low mapping.
-
 @symbol("_kernel_end") const kernel_end: [*]u8;
 
 def PAGE: uintptr = 4096;

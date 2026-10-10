@@ -1,12 +1,4 @@
-// The Bunix File Protocol. Our own message set, laid out in the spirit of the
-// file protocols that came before it: a small fixed header, a handful of
-// request/reply pairs, and a handle table on the server side.
-//
-// A message is size[4] type[1] tag[2] followed by a body, all little-endian.
-// The reply to a request of type n is type n + 1, so a client can check that it
-// got the answer it asked for. Files are named by walking from a root handle,
-// and each file is identified by an ident so a client can tell whether two
-// names refer to the same file.
+// Wire: size[4] type[1] tag[2] then a body; a reply is the request type + 1.
 
 export def TPROTO: u8 = 1;
 export def RPROTO: u8 = 2;
@@ -40,14 +32,12 @@ export type header = struct {
 	tag: u16,
 };
 
-// Writes the message header with a placeholder size.
 export fn begin(w: *writer, typ: u8, tag: u16) void = {
 	w_u32(w, 0);
 	w_u8(w, typ);
 	w_u16(w, tag);
 };
 
-// Patches the size field and returns the length of the finished message.
 export fn finish(w: *writer) size = {
 	const n = w.off: u32;
 	w.buf[0] = (n & 0xFF): u8;
@@ -72,7 +62,6 @@ fn write_ident(w: *writer, path: u64, typ: u8) void = {
 	w_u64(w, path);
 };
 
-// A handle names a file the server has opened on a client's behalf.
 export type slot = struct {
 	inuse: bool,
 	path: u64,
@@ -91,8 +80,6 @@ export fn new(content: str) server = {
 	};
 };
 
-// Handles one request and writes one reply. The root is a directory at path
-// zero; the single file "hello" is at path one.
 export fn handle(s: *server, in: []u8, out: []u8) size = {
 	const h = parse_header(in);
 	let r = reader { buf = in, off = HDR };
@@ -191,8 +178,6 @@ fn call(s: *server, w: *writer) []u8 = {
 	return resbuf[..rn];
 };
 
-// Performs proto, attach, walk, open, read and clunk over the loopback and
-// returns the file contents.
 export fn slurp(s: *server, name: str) []u8 = {
 	let w = writer { buf = reqbuf[..], off = 0 };
 	begin(&w, TPROTO, NOTAG);

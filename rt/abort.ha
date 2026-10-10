@@ -1,5 +1,3 @@
-// A write hook the kernel installs during startup so that runtime failures can
-// be reported. While it is null, aborts stop the machine silently.
 export let con_write: nullable *fn(buf: []u8) size = null;
 
 fn print(s: str) void = {

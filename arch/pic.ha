@@ -1,6 +1,3 @@
-// 8259 programmable interrupt controller. The BIOS maps the two chips over the
-// CPU exception vectors, so we relocate them to 32 and 40 first.
-
 export fn pic_remap() void = {
 	outb(0x20, 0x11); io_wait();
 	outb(0xA0, 0x11); io_wait();

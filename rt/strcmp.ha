@@ -1,5 +1,3 @@
-// Strings are not indexable at the language level, so we reach into the
-// representation to compare them byte by byte.
 type string = struct {
 	data: *[*]u8,
 	length: size,

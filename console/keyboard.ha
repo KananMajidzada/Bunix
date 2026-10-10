@@ -45,8 +45,6 @@ export fn keyboard_has_data() bool = {
 	return (arch::inb(0x64) & 1) != 0;
 };
 
-// Decodes one byte from the controller. Returns zero when the key produces no
-// character, such as a modifier or a release.
 export fn keyboard_getc() u8 = {
 	const sc = arch::inb(0x60);
 	if (sc == 0x2A || sc == 0x36) {

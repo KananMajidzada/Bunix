@@ -1,11 +1,3 @@
-/* Interrupt entry points.
- *
- * Each vector has a small stub that normalizes the stack: exceptions that do
- * not push an error code get a dummy one, then the vector number is pushed and
- * control converges on isr_common, which saves the general purpose registers
- * and calls into Hare.
- */
-
 .text
 
 .macro isr_noerr n
@@ -120,8 +112,6 @@ arch.load_idt:
 	lidt (%rdi)
 	ret
 
-/* Address of every stub, indexed by vector. Vectors past the IRQs fall back
- * to isr_default. */
 .section .rodata
 .align 8
 .global arch.isr_stubs

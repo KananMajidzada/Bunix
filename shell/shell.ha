@@ -6,9 +6,6 @@ use rt;
 use sched;
 use sys;
 
-// A placeholder command loop. The real shell will be a BFP client; for now this
-// only proves that input and output work end to end.
-
 def BUFSZ: size = 256;
 
 export fn run(mem_mib: u64) never = {
@@ -91,8 +88,7 @@ fn exec(mem_mib: u64, line: []u8) void = {
 	};
 };
 
-// Compares a line buffer against a string literal by reinterpreting it as a
-// string; the equality then goes through rt::strcmp.
+// Compares a line buffer with a literal through rt::strcmp.
 fn eq(line: []u8, s: str) bool = {
 	let a = *(&line: *str);
 	return a == s;
@@ -106,8 +102,6 @@ fn prefix(line: []u8, s: str) bool = {
 	return a == s;
 };
 
-// Builds a string on the heap with append, which drives the allocator, then
-// releases it.
 fn heap_demo() void = {
 	let b: []u8 = [];
 	for (let i = 0; i < 26; i += 1) {

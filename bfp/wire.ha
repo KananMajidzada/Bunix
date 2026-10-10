@@ -1,6 +1,3 @@
-// Little-endian primitives for Bunix File Protocol messages. Integers are
-// little-endian and strings are length-prefixed with a 16-bit count.
-
 export type ident = struct {
 	typ: u8,
 	vers: u32,

@@ -1,5 +1,3 @@
-// Programmable interval timer, channel 0, used as the system clock.
-
 def HZ: u32 = 100;
 
 let tick: u64 = 0;

@@ -1,6 +1,3 @@
-// The kernel entry, provided by the program built against this runtime. It
-// receives the physical address of the Multiboot information structure, or zero
-// if we were not booted by a Multiboot loader.
 @symbol("main") fn main(mbi: uintptr) void;
 
 @symbol("__init_array_start") const init_start: [*]*fn() void;
