@@ -1,19 +1,3 @@
-fn printnum(n: u64) void = {
-	let buf: [20]u8 = [0...];
-	let i = len(buf);
-	if (n == 0) {
-		i -= 1;
-		buf[i] = '0': u8;
-	} else {
-		for (n > 0) {
-			i -= 1;
-			buf[i] = ((n % 10): u8) + ('0': u8);
-			n /= 10;
-		};
-	};
-	write(buf[i..]);
-};
-
 export @symbol("rt.abort") fn _abort(
 	path: *str,
 	line: u64,

@@ -45,6 +45,23 @@ export fn println(s: str) void = {
 	print("\n");
 };
 
+export fn printnum(n: u64) void = {
+	let buf: [20]u8 = [0...];
+	let i = len(buf);
+	if (n == 0) {
+		i -= 1;
+		buf[i] = '0': u8;
+	} else {
+		let v = n;
+		for (v > 0) {
+			i -= 1;
+			buf[i] = ((v % 10): u8) + ('0': u8);
+			v /= 10;
+		};
+	};
+	write(buf[i..]);
+};
+
 export fn exit() never = sys_exit();
 
 export fn page_alloc(pages: u64) uintptr = sys_alloc(pages);

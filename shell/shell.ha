@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, ls, cat, write, mem, frames, uptime, bfp, heap, spawn, threads, user [path], fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, write, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -74,6 +74,8 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		run_user("/proc/version");
 	} else if (prefix(line, "user ")) {
 		run_user(*(&line[5..]: *str));
+	} else if (eq(line, "multi")) {
+		multi();
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
@@ -224,4 +226,31 @@ fn run_user(path: str) void = {
 		arch::pause();
 	};
 	console::println("user process exited");
+};
+
+fn multi() void = {
+	let ids: [3]size = [sched::NOID, sched::NOID, sched::NOID];
+	for (let i = 0z; i < 3; i += 1) {
+		let arg: [8]u8 = [0...];
+		arg[0] = '/': u8;
+		arg[1] = 's': u8;
+		arg[2] = 'p': u8;
+		arg[3] = 'i': u8;
+		arg[4] = 'n': u8;
+		arg[5] = ' ': u8;
+		arg[6] = ('1': u8) + (i: u8);
+		const s = *(&arg[..7]: *str);
+		ids[i] = loader::run(s);
+	};
+	let live = true;
+	for (live) {
+		live = false;
+		for (let i = 0z; i < 3; i += 1) {
+			if (sched::alive(ids[i])) {
+				live = true;
+			};
+		};
+		arch::pause();
+	};
+	console::println("all user processes exited");
 };

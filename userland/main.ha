@@ -44,6 +44,19 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 
+	if (starts(a, "/spin ")) {
+		for (let i = 0u64; i < 4; i += 1) {
+			rt::print(a);
+			rt::print(" step ");
+			rt::printnum(i);
+			rt::println("");
+			for (let j = 0u64; j < 4000000; j += 1) {
+				void;
+			};
+		};
+		return;
+	};
+
 	let buf: [256]u8 = [0...];
 	const n = rt::readfile(a, buf[..]);
 	if (n == 0) {
@@ -52,4 +65,18 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 	rt::write(buf[..n]);
+};
+
+fn starts(s: str, p: str) bool = {
+	const b = *(&s: *[]u8);
+	const pb = *(&p: *[]u8);
+	if (len(b) < len(pb)) {
+		return false;
+	};
+	for (let i = 0z; i < len(pb); i += 1) {
+		if (b[i] != pb[i]) {
+			return false;
+		};
+	};
+	return true;
 };
