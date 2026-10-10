@@ -1,26 +1,35 @@
-// A first cut at 9P2000: message framing, a tiny in-memory file server, and a
-// client that reads a file through it. Everything here is plain data, so the
-// same code will serve real channels once there are processes and file
-// descriptors to carry them.
+// The Bunix File Protocol. Our own message set, laid out in the spirit of the
+// file protocols that came before it: a small fixed header, a handful of
+// request/reply pairs, and a handle table on the server side.
+//
+// A message is size[4] type[1] tag[2] followed by a body, all little-endian.
+// The reply to a request of type n is type n + 1, so a client can check that it
+// got the answer it asked for. Files are named by walking from a root handle,
+// and each file is identified by an ident so a client can tell whether two
+// names refer to the same file.
 
-export def TVERSION: u8 = 100;
-export def RVERSION: u8 = 101;
-export def TATTACH: u8 = 104;
-export def RATTACH: u8 = 105;
-export def RERROR: u8 = 107;
-export def TWALK: u8 = 110;
-export def RWALK: u8 = 111;
-export def TOPEN: u8 = 112;
-export def ROPEN: u8 = 113;
-export def TREAD: u8 = 116;
-export def RREAD: u8 = 117;
-export def TCLUNK: u8 = 120;
-export def RCLUNK: u8 = 121;
+export def TPROTO: u8 = 1;
+export def RPROTO: u8 = 2;
+export def TATTACH: u8 = 3;
+export def RATTACH: u8 = 4;
+export def RERROR: u8 = 5;
+export def TWALK: u8 = 6;
+export def RWALK: u8 = 7;
+export def TOPEN: u8 = 8;
+export def ROPEN: u8 = 9;
+export def TREAD: u8 = 10;
+export def RREAD: u8 = 11;
+export def TCLUNK: u8 = 12;
+export def RCLUNK: u8 = 13;
 
 export def NOTAG: u16 = 0xFFFF;
-export def NOFID: u32 = 0xFFFFFFFF;
+export def NOHANDLE: u32 = 0xFFFFFFFF;
 
-export def QTDIR: u8 = 0x80;
+// ident type bits.
+export def IDDIR: u8 = 0x80;
+
+// The protocol name and revision exchanged by TPROTO.
+export def REVISION: str = "bfp1";
 
 // Header size: size[4] type[1] tag[2].
 def HDR: size = 7;
@@ -57,13 +66,13 @@ export fn parse_header(buf: []u8) header = {
 	};
 };
 
-fn write_qid(w: *writer, path: u64, typ: u8) void = {
+fn write_ident(w: *writer, path: u64, typ: u8) void = {
 	w_u8(w, typ);
 	w_u32(w, 0);
 	w_u64(w, path);
 };
 
-// A fid names an open file on the server side.
+// A handle names a file the server has opened on a client's behalf.
 export type slot = struct {
 	inuse: bool,
 	path: u64,
@@ -72,17 +81,17 @@ export type slot = struct {
 
 export type server = struct {
 	content: str,
-	fids: [16]slot,
+	handles: [16]slot,
 };
 
 export fn new(content: str) server = {
 	return server {
 		content = content,
-		fids = [slot { inuse = false, path = 0, typ = 0 }...],
+		handles = [slot { inuse = false, path = 0, typ = 0 }...],
 	};
 };
 
-// Handles one request and writes one response. The root is a directory at path
+// Handles one request and writes one reply. The root is a directory at path
 // zero; the single file "hello" is at path one.
 export fn handle(s: *server, in: []u8, out: []u8) size = {
 	const h = parse_header(in);
@@ -91,8 +100,8 @@ export fn handle(s: *server, in: []u8, out: []u8) size = {
 	begin(&w, h.typ + 1, h.tag);
 
 	switch (h.typ) {
-	case TVERSION =>
-		do_version(&w, &r);
+	case TPROTO =>
+		do_proto(&w, &r);
 	case TATTACH =>
 		do_attach(s, &w, &r);
 	case TWALK =>
@@ -110,40 +119,40 @@ export fn handle(s: *server, in: []u8, out: []u8) size = {
 	return finish(&w);
 };
 
-fn do_version(w: *writer, r: *reader) void = {
+fn do_proto(w: *writer, r: *reader) void = {
 	const msize = r_u32(r);
 	_ = r_bytes(r);
 	w_u32(w, msize);
-	w_str(w, "9P2000");
+	w_str(w, REVISION);
 };
 
 fn do_attach(s: *server, w: *writer, r: *reader) void = {
-	const fid = r_u32(r);
+	const h = r_u32(r);
 	_ = r_u32(r);
 	_ = r_bytes(r);
 	_ = r_bytes(r);
-	s.fids[fid: size] = slot { inuse = true, path = 0, typ = QTDIR };
-	write_qid(w, 0, QTDIR);
+	s.handles[h: size] = slot { inuse = true, path = 0, typ = IDDIR };
+	write_ident(w, 0, IDDIR);
 };
 
 fn do_walk(s: *server, w: *writer, r: *reader) void = {
 	_ = r_u32(r);
-	const nfid = r_u32(r);
+	const nh = r_u32(r);
 	const n = r_u16(r);
 	if (n == 1 && asstr(r_bytes(r)) == "hello") {
-		s.fids[nfid: size] = slot { inuse = true, path = 1, typ = 0 };
+		s.handles[nh: size] = slot { inuse = true, path = 1, typ = 0 };
 		w_u16(w, 1);
-		write_qid(w, 1, 0);
+		write_ident(w, 1, 0);
 	} else {
 		w_u16(w, 0);
 	};
 };
 
 fn do_open(s: *server, w: *writer, r: *reader) void = {
-	const fid = r_u32(r);
+	const h = r_u32(r);
 	_ = r_u8(r);
-	const f = s.fids[fid: size];
-	write_qid(w, f.path, f.typ);
+	const f = s.handles[h: size];
+	write_ident(w, f.path, f.typ);
 	w_u32(w, 0);
 };
 
@@ -161,8 +170,8 @@ fn do_read(s: *server, w: *writer, r: *reader) void = {
 };
 
 fn do_clunk(s: *server, w: *writer, r: *reader) void = {
-	const fid = r_u32(r);
-	s.fids[fid: size].inuse = false;
+	const h = r_u32(r);
+	s.handles[h: size].inuse = false;
 };
 
 fn do_error(w: *writer, tag: u16) void = {
@@ -182,19 +191,19 @@ fn call(s: *server, w: *writer) []u8 = {
 	return resbuf[..rn];
 };
 
-// Performs version, attach, walk, open, read and clunk over the loopback and
+// Performs proto, attach, walk, open, read and clunk over the loopback and
 // returns the file contents.
 export fn slurp(s: *server, name: str) []u8 = {
 	let w = writer { buf = reqbuf[..], off = 0 };
-	begin(&w, TVERSION, NOTAG);
+	begin(&w, TPROTO, NOTAG);
 	w_u32(&w, 8192);
-	w_str(&w, "9P2000");
+	w_str(&w, REVISION);
 	_ = call(s, &w);
 
 	w = writer { buf = reqbuf[..], off = 0 };
 	begin(&w, TATTACH, 0);
 	w_u32(&w, 0);
-	w_u32(&w, NOFID);
+	w_u32(&w, NOHANDLE);
 	w_str(&w, "bunix");
 	w_str(&w, "");
 	_ = call(s, &w);
@@ -231,14 +240,4 @@ export fn slurp(s: *server, name: str) []u8 = {
 	_ = call(s, &w);
 
 	return filebuf[..cnt];
-};
-
-// The version string negotiated by the last slurp, for callers that want to
-// show it.
-export fn negotiated_msize(s: *server, msize: u32) void = {
-	let w = writer { buf = reqbuf[..], off = 0 };
-	begin(&w, TVERSION, NOTAG);
-	w_u32(&w, msize);
-	w_str(&w, "9P2000");
-	_ = call(s, &w);
 };

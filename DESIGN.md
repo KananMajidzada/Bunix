@@ -3,30 +3,41 @@
 ## The shape of the system
 
 Bunix is native first. The kernel offers its own system calls and models the
-machine as a set of file servers speaking 9P, in the tradition of Plan 9. It is
-not a Unix clone and does not try to be. Programs that expect POSIX are served
-by a userspace port environment that translates POSIX calls onto the native
-interface, the way Plan 9's APE sat on top of 9P.
+machine as a set of file servers. It is not a Unix clone and does not try to be.
+Programs that expect POSIX are served by a userspace port environment that
+translates POSIX calls onto the native interface.
 
 The layering, from bottom to top:
 
-	port/         POSIX library and shell (not written yet)
-	9P servers    userspace file servers: /dev, /net, /proc, ...
-	namespace     per-process mount and bind tables
-	kernel        boot, memory, scheduler, IPC, drivers
+	port/        POSIX library and shell (not written yet)
+	file servers userspace servers: /dev, /net, /proc, ...
+	namespace    per-process mount and bind tables
+	kernel       boot, memory, scheduler, IPC, drivers
 
-Everything is a file. A device, a network stack, a window system, and a
-process's own address space are all reached by walking a namespace that each
-process builds for itself out of mounts and binds. The kernel's job is to make
-that model fast and safe, not to guess what a POSIX program wants.
+A device, a network stack, a window system, and a process's own address space
+are all reached by walking a namespace that each process builds for itself out
+of mounts and binds. The kernel's job is to make that model fast and safe, not
+to guess what a POSIX program wants.
+
+## The Bunix File Protocol
+
+File servers are reached over the Bunix File Protocol (BFP), the system's own
+request/reply protocol. It is deliberately small: a fixed header, a handful of
+message pairs, and a per-connection handle table. Files are located by walking
+from a root handle one name at a time, and each file carries an ident so two
+names can be compared without a round trip.
+
+The design borrows the general shape of earlier file protocols — typed
+messages, walkable names, handles — but the message set, numbering, and naming
+are ours. Nothing here is wire-compatible with another system.
 
 ## Why a single kernel
 
 Bunix is a single kernel image, not a microkernel. Drivers and file servers can
 move to userspace when there is a reason to, but the scheduling, memory, and
-9P plumbing live in the kernel where they can be simple. A microkernel here
-would trade a small amount of isolation for a large amount of IPC before any of
-it earned its keep.
+protocol plumbing live in the kernel where they can be simple. A microkernel
+here would trade a small amount of isolation for a large amount of IPC before
+any of it earned its keep.
 
 ## Boot
 
@@ -54,7 +65,7 @@ consistent everywhere:
 
 Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
 physical frame allocator, timer interrupts with an IDT, a runtime heap, and a
-first cut of 9P.
+first cut of the Bunix File Protocol.
 
 Next: a scheduler and kernel threads, then a first userspace process.
 
@@ -63,6 +74,6 @@ Next: a scheduler and kernel threads, then a first userspace process.
 1. Console, memory map, and a physical page allocator. [done]
 2. Interrupts, a timer, and a scheduler. [interrupts and timer done]
 3. Kernel threads and a first userspace process.
-4. A 9P server core and a per-process namespace. [wire format and a toy server done]
+4. A file-server core and a per-process namespace. [wire format and a toy server done]
 5. `/dev`, `/proc`, and an init process.
 6. The port environment: a POSIX library, a shell, and a C compiler driver.

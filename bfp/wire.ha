@@ -1,8 +1,7 @@
-// Little-endian primitives for 9P2000 messages. All lengths and offsets in the
-// protocol are little-endian integers, and strings are length-prefixed with a
-// 16-bit count.
+// Little-endian primitives for Bunix File Protocol messages. Integers are
+// little-endian and strings are length-prefixed with a 16-bit count.
 
-export type qid = struct {
+export type ident = struct {
 	typ: u8,
 	vers: u32,
 	path: u64,

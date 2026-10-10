@@ -4,6 +4,7 @@ use console;
 use mem;
 use rt;
 use shell;
+use sys;
 
 // Prints the vector and error code of a CPU exception, then stops.
 fn on_fault(regs: *arch::registers) void = {
@@ -21,7 +22,9 @@ fn on_fault(regs: *arch::registers) void = {
 // @init hooks have run; mbi is the physical address of the Multiboot
 // information, or zero if there was none.
 export @symbol("main") fn main(mbi: uintptr) void = {
-	console::println("Bunix, a native Plan 9-shaped system");
+	console::print(sys::NAME);
+	console::print(" ");
+	console::println(sys::VERSION);
 	console::println("");
 
 	if (mbi == 0) {

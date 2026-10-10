@@ -1,9 +1,11 @@
 # Bunix
 
-A native operating system written in Hare, built in the spirit of Plan 9: the
-kernel exposes its own small set of system calls and a 9P file interface rather
-than imitating POSIX. POSIX software is served later by a userspace port
-environment, not by the kernel.
+An independent operating system written in Hare. The kernel exposes its own
+small set of system calls and reaches resources through file servers rather
+than imitating POSIX; POSIX software is served later by a userspace port
+environment, not by the kernel. Bunix is not a clone of any existing system.
+Some ideas in its design trace back to earlier file-oriented systems, but it
+shares no code and no protocol with them.
 
 The kernel currently targets x86_64 and boots as a Multiboot image.
 
@@ -32,7 +34,8 @@ COM1.
 | `arch/`     | x86_64 CPU, port, interrupt, PIC, timer code    |
 | `boot/`     | Multiboot information parsing                   |
 | `mem/`      | Physical frame allocator                        |
-| `ninep/`    | 9P2000 wire format, a tiny server, and a client |
+| `bfp/`      | Bunix File Protocol: wire format, server, client |
+| `sys/`      | System name and version                         |
 | `console/`  | Serial, VGA text, and keyboard                  |
 | `shell/`    | Console command loop                            |
 | `main.ha`   | Kernel entry point                              |
@@ -44,14 +47,14 @@ Multiboot memory map, manages physical frames with a bitmap, and runs a
 PIT-driven clock behind an interrupt descriptor table. A small command loop is
 available on the console:
 
-	echo clear frames fault halt heap help mem uptime 9p
+	bfp clear echo fault frames halt heap help mem uptime version
 
-The `9p` command runs a full version/attach/walk/open/read/clunk exchange
-against an in-memory file server, so the 9P layer is exercised end to end. The
-`heap` command builds a string with `append`, which drives the runtime
+The `bfp` command runs a full proto/attach/walk/open/read/clunk exchange against
+an in-memory file server, so the Bunix File Protocol is exercised end to end.
+The `heap` command builds a string with `append`, which drives the runtime
 allocator the compiler lowers the built-ins to.
 
 ![boot](doc/boot.png)
 
-There are no processes, no filesystem, and no 9P yet. See `DESIGN.md` for where
-it is going.
+There are no processes and no filesystem yet. See `DESIGN.md` for where it is
+going.

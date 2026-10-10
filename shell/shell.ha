@@ -1,10 +1,11 @@
 use arch;
+use bfp;
 use console;
 use mem;
-use ninep;
 use rt;
+use sys;
 
-// A placeholder command loop. The real shell will be a 9P client; for now this
+// A placeholder command loop. The real shell will be a BFP client; for now this
 // only proves that input and output work end to end.
 
 def BUFSZ: size = 256;
@@ -44,16 +45,20 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, echo, clear, mem, frames, uptime, 9p, heap, fault, halt");
+		console::println("commands: help, version, echo, clear, mem, frames, uptime, bfp, heap, fault, halt");
+	} else if (eq(line, "version")) {
+		console::print(sys::NAME);
+		console::print(" ");
+		console::println(sys::VERSION);
 	} else if (prefix(line, "echo ")) {
 		console::write(line[len("echo ")..]);
 		console::putc('\n': u8);
 	} else if (eq(line, "clear")) {
 		console::clear();
-	} else if (eq(line, "9p")) {
-		let srv = ninep::new("hello from 9P\n");
-		const data = ninep::slurp(&srv, "hello");
-		console::print("9p: ");
+	} else if (eq(line, "bfp")) {
+		let srv = bfp::new("hello from the Bunix File Protocol\n");
+		const data = bfp::slurp(&srv, "hello");
+		console::print("bfp: ");
 		console::write(data);
 	} else if (eq(line, "heap")) {
 		heap_demo();
