@@ -29,10 +29,10 @@ _start:
 	decl %ecx
 	jnz 2b
 
-	/* Identity map 1 GiB: 512 entries of 2 MiB, present and writable. */
+	/* Identity map 1 GiB: 512 entries of 2 MiB, present, writable, user. */
 	leal boot_pd, %edi
 	xorl %ecx, %ecx
-	movl $0x00000083, %eax
+	movl $0x00000087, %eax
 3:	movl %eax, (%edi)
 	addl $0x200000, %eax
 	addl $8, %edi
@@ -42,10 +42,10 @@ _start:
 
 	/* Link the page directory into the PDPT and the PDPT into the PML4. */
 	leal boot_pd, %eax
-	orl $0x03, %eax
+	orl $0x07, %eax
 	movl %eax, boot_pdpt
 	leal boot_pdpt, %eax
-	orl $0x03, %eax
+	orl $0x07, %eax
 	movl %eax, boot_pml4
 
 	/* Enable PAE and load the PML4. */
@@ -90,9 +90,35 @@ gdt64:
 	.quad 0x0000000000000000			/* null */
 	.quad 0x00AF9A000000FFFF			/* code, ring 0 */
 	.quad 0x00CF92000000FFFF			/* data, ring 0 */
+	.quad 0x00AFFA000000FFFF			/* code, ring 3 */
+	.quad 0x00CFF2000000FFFF			/* data, ring 3 */
+.global gdt64_tss
+gdt64_tss:
+	.quad 0
+	.quad 0
 gdt64_ptr:
 	.word gdt64_ptr - gdt64 - 1
 	.quad gdt64
+
+.global tss
+.align 16
+tss:
+	.long 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.quad 0
+	.word 0
+	.word 104
+tss_end:
 
 .section .bss
 .align 4096

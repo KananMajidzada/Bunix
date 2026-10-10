@@ -63,6 +63,8 @@ isr_noerr 45
 isr_noerr 46
 isr_noerr 47
 
+isr_noerr 128
+
 isr_default:
 	pushq $0
 	pushq $0xFF
@@ -164,6 +166,10 @@ arch.isr_stubs:
 	.quad isr_45
 	.quad isr_46
 	.quad isr_47
-	.rept 208
+	.rept 80
+	.quad isr_default
+	.endr
+	.quad isr_128
+	.rept 127
 	.quad isr_default
 	.endr

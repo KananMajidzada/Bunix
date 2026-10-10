@@ -5,6 +5,7 @@ use mem;
 use rt;
 use sched;
 use sys;
+use user;
 
 def BUFSZ: size = 256;
 
@@ -43,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, mem, frames, uptime, bfp, heap, spawn, threads, fault, halt");
+		console::println("commands: help, version, echo, clear, mem, frames, uptime, bfp, heap, spawn, threads, user, fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -64,6 +65,8 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		spawn_workers();
 	} else if (eq(line, "threads")) {
 		show_threads();
+	} else if (eq(line, "user")) {
+		run_user();
 	} else if (eq(line, "mem")) {
 		console::print("available: ");
 		console::printnum(mem_mib);
@@ -150,7 +153,7 @@ fn spawn_workers() void = {
 
 fn show_threads() void = {
 	console::print("threads: ");
-	console::printnum(sched::count());
+	console::printnum(sched::live());
 	console::putc('\n');
 	for (let i = 0z; i < NWORKERS; i += 1) {
 		console::print("worker ");
@@ -159,4 +162,31 @@ fn show_threads() void = {
 		console::printnum(counters[i]);
 		console::putc('\n');
 	};
+};
+
+fn run_user() void = {
+	const pages = ((len(user::prog) + 4095) / 4096): u64;
+	const code = mem::frames_alloc(pages);
+	if (code == 0) {
+		console::println("no memory for the user program");
+		return;
+	};
+	for (let i = 0z; i < len(user::prog); i += 1) {
+		const p = (code + (i: uintptr)): *u8;
+		*p = user::prog[i];
+	};
+	const ustack = mem::frames_alloc(2);
+	if (ustack == 0) {
+		console::println("no memory for the user stack");
+		return;
+	};
+	const id = sched::spawn_user(code, ustack + 8192: uintptr);
+	if (id == sched::NOID) {
+		console::println("could not start the user process");
+		return;
+	};
+	for (sched::alive(id)) {
+		arch::pause();
+	};
+	console::println("user process exited");
 };

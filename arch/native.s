@@ -57,3 +57,9 @@ arch.probe:
 arch.pause:
 	pause
 	ret
+
+.global arch.ltr
+arch.ltr:
+	movw %di, %ax
+	ltr %ax
+	ret

@@ -2,6 +2,8 @@ use rt;
 
 @symbol("arch.isr_stubs") const isr_stubs: [*]uintptr;
 
+export def SYSCALL: size = 128;
+
 export let fault_hook: nullable *fn(regs: *registers) void = null;
 export let irq_hook: nullable *fn(vec: u64) void = null;
 
@@ -16,6 +18,7 @@ export type registers = struct {
 };
 
 export let sched_hook: nullable *fn(regs: *registers) uintptr = null;
+export let syscall_hook: nullable *fn(regs: *registers) uintptr = null;
 
 type gate = struct @packed {
 	off_low: u16,
@@ -46,7 +49,7 @@ export fn idt_init() void = {
 			off_low = (addr & 0xFFFF): u16,
 			sel = 0x08,
 			ist = 0,
-			type_attr = 0x8E,
+			type_attr = if (i == SYSCALL) 0xEE else 0x8E,
 			off_mid = ((addr >> 16) & 0xFFFF): u16,
 			off_high = (addr >> 32): u32,
 			zero = 0,
@@ -70,6 +73,8 @@ export fn isr_handler(regs: *registers) uintptr = {
 		rt::halt();
 	} else if (v == 0xFF) {
 		rt::halt();
+	} else if (v == (SYSCALL: u64)) {
+		return dispatch(syscall_hook, regs);
 	} else {
 		if (v == 32) {
 			timer_tick();
@@ -84,15 +89,15 @@ export fn isr_handler(regs: *registers) uintptr = {
 		};
 		outb(0x20, 0x20);
 		if (v == 32) {
-			return reschedule(regs);
+			return dispatch(sched_hook, regs);
 		};
 	};
 	return regs: uintptr;
 };
 
-fn reschedule(regs: *registers) uintptr = {
+fn dispatch(hook: nullable *fn(regs: *registers) uintptr, regs: *registers) uintptr = {
 	let frame = regs: uintptr;
-	match (sched_hook) {
+	match (hook) {
 	case null => void;
 	case let f: *fn(regs: *registers) uintptr =>
 		frame = f(regs);

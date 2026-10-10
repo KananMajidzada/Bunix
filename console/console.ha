@@ -12,6 +12,12 @@ export fn write(buf: []u8) size = {
 	return len(buf);
 };
 
+export fn write_raw(addr: uintptr, n: size) void = {
+	for (let i = 0z; i < n; i += 1) {
+		putc(*((addr + (i: uintptr)): *u8));
+	};
+};
+
 export fn print(s: str) void = {
 	write(*(&s: *[]u8));
 };

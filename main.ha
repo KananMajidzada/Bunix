@@ -6,6 +6,7 @@ use rt;
 use sched;
 use shell;
 use sys;
+use syscall;
 
 fn on_fault(regs: *arch::registers) void = {
 	console::print("\nexception ");
@@ -58,6 +59,8 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	arch::pic_remap();
 	arch::timer_init();
 	arch::pic_unmask(0);
+	arch::tss_init();
+	syscall::init();
 	sched::start();
 	arch::sched_hook = &sched::tick;
 	arch::sti();
