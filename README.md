@@ -56,7 +56,7 @@ and user-mode (ring 3) processes, each with its own address space, and serves a
 small file namespace over the Bunix File Protocol. A command loop is available
 on the console:
 
-	bfp cat clear echo fault frames halt heap help ls mem mkdir multi rm spawn threads touch uptime user version write
+	bfp cat clear echo fault frames halt heap help ls mem mkdir multi rm sh spawn threads touch uptime user version write
 
 The file namespace is read and written over BFP. Files under `/dev` and `/proc`
 are served from the kernel: `/dev/note` is a writable store, `/dev/cons` echoes
@@ -66,9 +66,11 @@ create or remove files in the in-memory tree, and `bfp` shows a full exchange.
 
 User programs are freestanding Hare programs with their own runtime. They reach
 files through the `readfile` and `writefile` system calls, which travel the BFP
-path into the in-kernel file server, allocate memory through an `alloc` system
-call, and print through a `write` system call. `user <path>` runs one program,
-and `multi` runs three at once in separate address spaces.
+path into the in-kernel file server, read the console one byte at a time, yield
+the CPU, allocate memory through an `alloc` system call, and print through a
+`write` system call. `user <path>` runs one program, and `multi` runs three at
+once in separate address spaces. The `sh` command runs an interactive shell in a
+user process, so `ls` and `cat` are served to ring 3 over the native calls.
 
 ![boot](doc/boot.png)
 
