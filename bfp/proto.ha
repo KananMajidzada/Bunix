@@ -15,6 +15,10 @@ export def TCLUNK: u8 = 12;
 export def RCLUNK: u8 = 13;
 export def TWRITE: u8 = 14;
 export def RWRITE: u8 = 15;
+export def TCREATE: u8 = 16;
+export def RCREATE: u8 = 17;
+export def TREMOVE: u8 = 18;
+export def RREMOVE: u8 = 19;
 
 export def NOTAG: u16 = 0xFFFF;
 export def NOHANDLE: u32 = 0xFFFFFFFF;

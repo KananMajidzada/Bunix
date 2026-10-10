@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, ls, cat, write, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, write, mkdir, touch, rm, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -62,6 +62,12 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		cat(*(&line[4..]: *str));
 	} else if (prefix(line, "write ")) {
 		write_cmd(*(&line[6..]: *str));
+	} else if (prefix(line, "mkdir ")) {
+		mkdir_cmd(*(&line[6..]: *str));
+	} else if (prefix(line, "touch ")) {
+		touch_cmd(*(&line[6..]: *str));
+	} else if (prefix(line, "rm ")) {
+		rm_cmd(*(&line[3..]: *str));
 	} else if (eq(line, "bfp")) {
 		bfp_demo();
 	} else if (eq(line, "heap")) {
@@ -119,12 +125,11 @@ fn list(path: str) void = {
 };
 
 fn cat(path: str) void = {
-	const data = fs::cat(path);
-	if (len(data) == 0) {
+	if (!fs::exists(path)) {
 		console::println("no such file");
 		return;
 	};
-	console::write(data);
+	console::write(fs::cat(path));
 };
 
 fn write_cmd(args: str) void = {
@@ -146,6 +151,30 @@ fn write_cmd(args: str) void = {
 	console::print("wrote ");
 	console::printnum(n: u64);
 	console::println(" bytes");
+};
+
+fn mkdir_cmd(path: str) void = {
+	if (fs::create(path, true)) {
+		console::println("created");
+	} else {
+		console::println("cannot create");
+	};
+};
+
+fn touch_cmd(path: str) void = {
+	if (fs::create(path, false)) {
+		console::println("created");
+	} else {
+		console::println("cannot create");
+	};
+};
+
+fn rm_cmd(path: str) void = {
+	if (fs::remove(path)) {
+		console::println("removed");
+	} else {
+		console::println("cannot remove");
+	};
 };
 
 fn bfp_demo() void = {

@@ -12,7 +12,8 @@ def BUFSZ: size = 2048;
 def NOCHILD: size = ~0z;
 
 export type node = struct {
-	name: str,
+	nam: [32]u8,
+	nlen: size,
 	isdir: bool,
 	nchild: size,
 	children: [MAXCHILD]size,
@@ -34,7 +35,7 @@ type server = struct {
 };
 
 let nodes: [MAXNODE]node = [node {
-	name = "", isdir = false, nchild = 0, children = [0...],
+	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
 	content = "", gen = null, writable = false, wdev = null,
 	wlen = 0, wbuf = [0...],
 }...];
@@ -51,13 +52,28 @@ let filebuf: [BUFSZ]u8 = [0...];
 
 fn mknode(name: str, isdir: bool) size = {
 	const id = nnodes;
-	nodes[id] = node {
-		name = name, isdir = isdir, nchild = 0, children = [0...],
-		content = "", gen = null, writable = false, wdev = null,
-		wlen = 0, wbuf = [0...],
+	const nd = &nodes[id];
+	nd.nam = [0...];
+	const b = *(&name: *[]u8);
+	nd.nlen = len(b);
+	for (let i = 0z; i < len(b) && i < 32; i += 1) {
+		nd.nam[i] = b[i];
 	};
+	nd.isdir = isdir;
+	nd.nchild = 0;
+	nd.children = [0...];
+	nd.content = "";
+	nd.gen = null;
+	nd.writable = false;
+	nd.wdev = null;
+	nd.wlen = 0;
+	nd.wbuf = [0...];
 	nnodes += 1;
 	return id;
+};
+
+fn nodename(id: size) str = {
+	return *(&nodes[id].nam[..nodes[id].nlen]: *str);
 };
 
 fn link(parent: size, child: size) void = {
@@ -188,11 +204,29 @@ fn find(parent: size, name: []u8) size = {
 	};
 	for (let i = 0z; i < nd.nchild; i += 1) {
 		const c = nd.children[i];
-		if (name_eq(nodes[c].name, name)) {
+		if (name_eq(nodename(c), name)) {
 			return c;
 		};
 	};
 	return NOCHILD;
+};
+
+fn unlink(id: size) void = {
+	for (let p = 0z; p < nnodes; p += 1) {
+		const nd = &nodes[p];
+		if (!nd.isdir) {
+			continue;
+		};
+		for (let i = 0z; i < nd.nchild; i += 1) {
+			if (nd.children[i] == id) {
+				for (let j = i; j + 1 < nd.nchild; j += 1) {
+					nd.children[j] = nd.children[j + 1];
+				};
+				nd.nchild -= 1;
+				return;
+			};
+		};
+	};
 };
 
 fn kind_of(id: size) u8 = {
@@ -203,7 +237,7 @@ fn listdir(id: size) []u8 = {
 	let n = 0z;
 	const nd = &nodes[id];
 	for (let i = 0z; i < nd.nchild; i += 1) {
-		n += put_str(scratch[n..], nodes[nd.children[i]].name);
+		n += put_str(scratch[n..], nodename(nd.children[i]));
 		scratch[n] = '\n': u8;
 		n += 1;
 	};
@@ -317,6 +351,51 @@ fn do_write(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 	bfp::w_u32(w, n: u32);
 };
 
+fn do_create(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+	const fid = bfp::r_u32(r);
+	const name = bfp::r_bytes(r);
+	const isdir = bfp::r_u8(r) != 0;
+	const nd = &nodes[s.handles[fid: size].node];
+	if (!nd.isdir || nd.nchild >= MAXCHILD || nnodes >= MAXNODE) {
+		put_ident(w, bfp::NOHANDLE: size, 0);
+		return;
+	};
+	if (len(name) == 0 || len(name) > 31) {
+		put_ident(w, bfp::NOHANDLE: size, 0);
+		return;
+	};
+	if (find(s.handles[fid: size].node, name) != NOCHILD) {
+		put_ident(w, bfp::NOHANDLE: size, 0);
+		return;
+	};
+	const parent = s.handles[fid: size].node;
+	const child = mknode(*(&name: *str), isdir);
+	nodes[child].writable = !isdir;
+	link(parent, child);
+	put_ident(w, child, kind_of(child));
+};
+
+fn do_remove(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+	const fid = bfp::r_u32(r);
+	const id = s.handles[fid: size].node;
+	if (id == root || (nodes[id].isdir && nodes[id].nchild > 0)) {
+		bfp::w_u32(w, 0);
+		return;
+	};
+	unlink(id);
+	const nd = &nodes[id];
+	nd.nam = [0...];
+	nd.nlen = 0;
+	nd.isdir = false;
+	nd.nchild = 0;
+	nd.content = "";
+	nd.gen = null;
+	nd.writable = false;
+	nd.wdev = null;
+	nd.wlen = 0;
+	bfp::w_u32(w, 1);
+};
+
 fn do_error(w: *bfp::writer, tag: u16) void = {
 	w.off = 0;
 	bfp::begin(w, bfp::RERROR, tag);
@@ -341,6 +420,10 @@ fn handle(s: *server, in: []u8, out: []u8) size = {
 		do_read(s, &w, &r);
 	case bfp::TWRITE =>
 		do_write(s, &w, &r);
+	case bfp::TCREATE =>
+		do_create(s, &w, &r);
+	case bfp::TREMOVE =>
+		do_remove(s, &w, &r);
 	case bfp::TCLUNK =>
 		do_clunk(s, &w, &r);
 	case =>
@@ -444,6 +527,11 @@ export fn cat(path: str) []u8 = {
 	return read_all(fid);
 };
 
+export fn exists(path: str) bool = {
+	const p = *(&path: *[]u8);
+	return walkpath(p) != bfp::NOHANDLE;
+};
+
 export fn write_file(path: str, data: []u8) size = {
 	const p = *(&path: *[]u8);
 	const fid = walkpath(p);
@@ -473,4 +561,67 @@ export fn write_file(path: str, data: []u8) size = {
 	_ = send(&w);
 
 	return n;
+};
+
+export fn create(path: str, isdir: bool) bool = {
+	const p = *(&path: *[]u8);
+	let slash = NOCHILD;
+	for (let i = 0z; i < len(p); i += 1) {
+		if (p[i] == ('/': u8)) {
+			slash = i;
+		};
+	};
+	if (slash == NOCHILD) {
+		return false;
+	};
+	const parent = if (slash == 0) "/" else *(&p[..slash]: *str);
+	const base = p[slash + 1..];
+	if (len(base) == 0) {
+		return false;
+	};
+	const fid = walkpath(*(&parent: *[]u8));
+	if (fid == bfp::NOHANDLE) {
+		return false;
+	};
+
+	let w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TCREATE, 8);
+	bfp::w_u32(&w, fid);
+	bfp::w_u16(&w, len(base): u16);
+	bfp::w_bytes(&w, base);
+	bfp::w_u8(&w, if (isdir) 1 else 0);
+	const resp = send(&w);
+	let r = bfp::reader { buf = resp, off = bfp::HDR };
+	_ = bfp::r_u8(&r);
+	_ = bfp::r_u32(&r);
+	const nid = bfp::r_u64(&r);
+
+	w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TCLUNK, 9);
+	bfp::w_u32(&w, fid);
+	_ = send(&w);
+
+	return nid != (bfp::NOHANDLE: u64);
+};
+
+export fn remove(path: str) bool = {
+	const p = *(&path: *[]u8);
+	const fid = walkpath(p);
+	if (fid == bfp::NOHANDLE) {
+		return false;
+	};
+
+	let w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TREMOVE, 8);
+	bfp::w_u32(&w, fid);
+	const resp = send(&w);
+	let r = bfp::reader { buf = resp, off = bfp::HDR };
+	const ok = bfp::r_u32(&r);
+
+	w = bfp::writer { buf = reqbuf[..], off = 0 };
+	bfp::begin(&w, bfp::TCLUNK, 9);
+	bfp::w_u32(&w, fid);
+	_ = send(&w);
+
+	return ok != 0;
 };
