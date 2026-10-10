@@ -83,10 +83,11 @@ consistent everywhere:
 
 Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
 physical frame allocator, timer interrupts with an IDT, a runtime heap, kernel
-threads, a first userspace process, per-process address spaces, and a small file
-namespace over the Bunix File Protocol.
+threads, a first userspace process, per-process address spaces, several
+processes running at once, and a small read/write file namespace over the Bunix
+File Protocol.
 
-Next: an init process and file-server writes, then the port environment.
+Next: an init process and per-process namespaces, then the port environment.
 
 ## Roadmap
 
