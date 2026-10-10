@@ -1,6 +1,6 @@
 use arch;
-use bfp;
 use console;
+use fs;
 use mem;
 use rt;
 use sched;
@@ -44,7 +44,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, mem, frames, uptime, bfp, heap, spawn, threads, user, fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, mem, frames, uptime, bfp, heap, spawn, threads, user, fault, halt");
 	} else if (eq(line, "version")) {
 		console::print(sys::NAME);
 		console::print(" ");
@@ -54,11 +54,14 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		console::putc('\n': u8);
 	} else if (eq(line, "clear")) {
 		console::clear();
+	} else if (eq(line, "ls")) {
+		list("/");
+	} else if (prefix(line, "ls ")) {
+		list(*(&line[3..]: *str));
+	} else if (prefix(line, "cat ")) {
+		cat(*(&line[4..]: *str));
 	} else if (eq(line, "bfp")) {
-		let srv = bfp::new("hello from the Bunix File Protocol\n");
-		const data = bfp::slurp(&srv, "hello");
-		console::print("bfp: ");
-		console::write(data);
+		bfp_demo();
 	} else if (eq(line, "heap")) {
 		heap_demo();
 	} else if (eq(line, "spawn")) {
@@ -103,6 +106,28 @@ fn prefix(line: []u8, s: str) bool = {
 	};
 	let a = *(&line[..len(s)]: *str);
 	return a == s;
+};
+
+fn list(path: str) void = {
+	console::write(fs::cat(path));
+};
+
+fn cat(path: str) void = {
+	const data = fs::cat(path);
+	if (len(data) == 0) {
+		console::println("no such file");
+		return;
+	};
+	console::write(data);
+};
+
+fn bfp_demo() void = {
+	console::print("ls /:\n");
+	console::write(fs::cat("/"));
+	console::print("cat /proc/version: ");
+	console::write(fs::cat("/proc/version"));
+	console::print("cat /proc/uptime: ");
+	console::write(fs::cat("/proc/uptime"));
 };
 
 fn heap_demo() void = {

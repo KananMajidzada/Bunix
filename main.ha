@@ -1,6 +1,7 @@
 use arch;
 use boot;
 use console;
+use fs;
 use mem;
 use rt;
 use sched;
@@ -48,6 +49,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	};
 
 	mem::init(mb);
+	fs::init();
 	console::print("frames:    ");
 	console::printnum(mem::free_frames());
 	console::print(" free of ");
