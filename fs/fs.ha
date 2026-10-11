@@ -233,6 +233,14 @@ fn gen_mem(buf: []u8) size = {
 	return n;
 };
 
+fn gen_self(buf: []u8) size = {
+	let n = put_str(buf, "pid ");
+	n += put_num(buf[n..], sched::running());
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
 fn gen_threads(buf: []u8) size = {
 	let n = put_str(buf, "threads ");
 	n += put_num(buf[n..], sched::live(): u64);
@@ -289,6 +297,10 @@ export fn init() void = {
 	const threads = mknode("threads", false);
 	nodes[threads].gen = &gen_threads;
 	link(proc, threads);
+
+	const self = mknode("self", false);
+	nodes[self].gen = &gen_self;
+	link(proc, self);
 
 	const files = mknode("files", false);
 	nodes[files].gen = &gen_files;

@@ -59,6 +59,9 @@ export @symbol("main") fn main() void = {
 		rt::print("shared /hello bytes: ");
 		rt::printnum(k: u64);
 		rt::println("");
+		k = rt::readfile("/proc/self", out[..]);
+		rt::print("this process: ");
+		rt::write(out[..k]);
 		return;
 	};
 
