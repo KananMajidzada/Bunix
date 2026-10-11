@@ -53,26 +53,30 @@ The kernel enters long mode, brings up the serial and VGA consoles, reads the
 Multiboot memory map, manages physical frames with a bitmap, and runs a
 PIT-driven clock behind an interrupt descriptor table. It runs kernel threads
 and user-mode (ring 3) processes, each with its own address space, and serves a
-small file namespace over the Bunix File Protocol. A command loop is available
-on the console:
+file namespace over the Bunix File Protocol.
 
-	bfp cat clear echo fault frames halt heap help ls mem mkdir multi rm sh spawn threads touch uptime user version write
+At boot the kernel starts a user-mode init, a shell running in ring 3 that owns
+the console and offers:
+
+	cat ls echo write mkdir touch rm user multi halt version exit
+
+`user <path>` runs another copy of the program against a path, `user /bad`
+demonstrates the protection boundary (the process is killed for touching
+supervisor memory), and `multi` runs three programs at once. If init exits, the
+kernel restarts it.
 
 The file namespace is read and written over BFP. Files under `/dev` and `/proc`
 are served from the kernel: `/dev/note` is a writable store, `/dev/cons` echoes
-writes to the console, and `/proc/*` reports live facts. The `cat`, `write`,
-`mkdir`, `touch`, and `rm` commands walk that namespace through the protocol and
-create or remove files in the in-memory tree, and `bfp` shows a full exchange.
+writes to the console, and `/proc/*` reports live facts. `ls`, `cat`, `write`,
+`mkdir`, `touch`, and `rm` walk that namespace through the protocol from
+userspace and create or remove files in the in-memory tree.
 
 User programs are freestanding Hare programs with their own runtime. They reach
 files through the `readfile` and `writefile` system calls, which travel the BFP
 path into the in-kernel file server, read the console one byte at a time, yield
-the CPU, allocate memory through an `alloc` system call, and print through a
-`write` system call. `user <path>` runs one program, and `multi` runs three at
-once in separate address spaces. The `sh` command runs an interactive shell in a
-user process, so `ls` and `cat` are served to ring 3 over the native calls.
+the CPU, spawn and watch other processes, allocate memory through an `alloc`
+system call, and print through a `write` system call.
 
 ![boot](doc/boot.png)
 
-There is no filesystem persistence and no init process yet. See `DESIGN.md` for
-where it is going.
+There is no filesystem persistence yet. See `DESIGN.md` for where it is going.

@@ -27,6 +27,7 @@ fn on_fault(regs: *arch::registers) uintptr = {
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {
+	console::print(sys::BANNER);
 	console::print(sys::NAME);
 	console::print(" ");
 	console::println(sys::VERSION);

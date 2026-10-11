@@ -84,10 +84,11 @@ consistent everywhere:
 Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
 physical frame allocator, timer interrupts with an IDT, a runtime heap, kernel
 threads, a first userspace process, per-process address spaces, several
-processes running at once, and an in-memory file tree served over the Bunix File
-Protocol with create, read, write, and remove.
+processes running at once, a user-mode init with an interactive shell, and an
+in-memory file tree served over the Bunix File Protocol with create, read,
+write, and remove.
 
-Next: an init process and per-process namespaces, then the port environment.
+Next: per-process namespaces, then the port environment.
 
 ## Roadmap
 
@@ -95,5 +96,5 @@ Next: an init process and per-process namespaces, then the port environment.
 2. Interrupts, a timer, and a scheduler. [done]
 3. Kernel threads and a first userspace process. [done]
 4. A file-server core and a per-process namespace. [file-server core done]
-5. `/dev`, `/proc`, and an init process. [partial: /dev, /proc done]
+5. `/dev`, `/proc`, and an init process. [done]
 6. The port environment: a POSIX library, a shell, and a C compiler driver.

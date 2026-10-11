@@ -112,7 +112,8 @@ fn put_num(buf: []u8, v: u64) size = {
 };
 
 fn gen_version(buf: []u8) size = {
-	let n = put_str(buf, sys::NAME);
+	let n = put_str(buf, sys::BANNER);
+	n += put_str(buf[n..], sys::NAME);
 	buf[n] = ' ': u8;
 	n += 1;
 	n += put_str(buf[n..], sys::VERSION);
