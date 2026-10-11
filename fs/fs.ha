@@ -30,6 +30,7 @@ export type ns = struct {
 	root: size,
 	inuse: [MAXHANDLE]bool,
 	hnode: [MAXHANDLE]size,
+	owned: bool,
 };
 
 fn hold(s: *ns, fid: size, node: size) void = {
@@ -40,6 +41,10 @@ fn hold(s: *ns, fid: size, node: size) void = {
 fn hget(s: *ns, fid: size) size = {
 	return s.hnode[fid];
 };
+
+let freehead: size = NOCHILD;
+let nextfree: [MAXNODE]size = [0...];
+let nused: size = 0;
 
 let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
@@ -54,6 +59,7 @@ let nss: [MAXNS]ns = [ns {
 	root = 0,
 	inuse = [false...],
 	hnode = [0...],
+	owned = false,
 }...];
 
 let reqbuf: [BUFSZ]u8 = [0...];
@@ -62,7 +68,15 @@ let scratch: [BUFSZ]u8 = [0...];
 let filebuf: [BUFSZ]u8 = [0...];
 
 fn mknode(name: str, isdir: bool) size = {
-	const id = nnodes;
+	const id = if (freehead != NOCHILD) {
+		const id0 = freehead;
+		freehead = nextfree[id0];
+		yield id0;
+	} else {
+		const id0 = nnodes;
+		nnodes += 1;
+		yield id0;
+	};
 	const nd = &nodes[id];
 	nd.nam = [0...];
 	const b = *(&name: *[]u8);
@@ -79,8 +93,24 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.wdev = null;
 	nd.wlen = 0;
 	nd.wbuf = [0...];
-	nnodes += 1;
+	nused += 1;
 	return id;
+};
+
+fn free_node(id: size) void = {
+	nextfree[id] = freehead;
+	freehead = id;
+	nused -= 1;
+};
+
+fn free_tree(id: size) void = {
+	const nd = &nodes[id];
+	for (let i = 0z; i < nd.nchild; i += 1) {
+		free_tree(nd.children[i]);
+	};
+	nd.nchild = 0;
+	nd.children = [0...];
+	free_node(id);
 };
 
 fn nodename(id: size) str = {
@@ -211,6 +241,16 @@ fn gen_threads(buf: []u8) size = {
 	return n;
 };
 
+fn gen_files(buf: []u8) size = {
+	let n = put_str(buf, "nodes in use ");
+	n += put_num(buf[n..], nused: u64);
+	n += put_str(buf[n..], " of ");
+	n += put_num(buf[n..], MAXNODE: u64);
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
 export fn init() void = {
 	root = mknode("/", true);
 	const dev = mknode("dev", true);
@@ -250,7 +290,12 @@ export fn init() void = {
 	nodes[threads].gen = &gen_threads;
 	link(proc, threads);
 
+	const files = mknode("files", false);
+	nodes[files].gen = &gen_files;
+	link(proc, files);
+
 	nss[0].root = root;
+	sched::reap_hook = &ns_reap;
 };
 
 export fn cur() *ns = {
@@ -279,6 +324,29 @@ export fn ns_install(id: size, fresh: bool) void = {
 		root = if (fresh) ns_root_make() else root,
 		inuse = [false...],
 		hnode = [0...],
+		owned = fresh,
+	};
+};
+
+// Frees the private nodes of a dead process; the shared binds stay put.
+export fn ns_reap(id: size) void = {
+	if (id >= MAXNS || !nss[id].owned) {
+		return;
+	};
+	const r = nss[id].root;
+	const nd = &nodes[r];
+	for (let i = 0z; i < nd.nchild; i += 1) {
+		const c = nd.children[i];
+		if (c != devroot && c != procroot) {
+			free_tree(c);
+		};
+	};
+	free_node(r);
+	nss[id] = ns {
+		root = 0,
+		inuse = [false...],
+		hnode = [0...],
+		owned = false,
 	};
 };
 
@@ -481,16 +549,7 @@ fn do_remove(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 		return;
 	};
 	unlink(id);
-	const nd = &nodes[id];
-	nd.nam = [0...];
-	nd.nlen = 0;
-	nd.isdir = false;
-	nd.nchild = 0;
-	nd.content = "";
-	nd.gen = null;
-	nd.writable = false;
-	nd.wdev = null;
-	nd.wlen = 0;
+	free_node(id);
 	bfp::w_u32(w, 1);
 };
 

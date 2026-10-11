@@ -29,6 +29,17 @@ let threads: [MAXTHREADS]thread = [thread {
 let nthreads: size = 0;
 let current: size = 0;
 
+// Called when a thread dies, so modules can drop its per-process state.
+export let reap_hook: nullable *fn(id: size) void = null;
+
+fn call_reap() void = {
+	match (reap_hook) {
+	case null => void;
+	case let f: *fn(id: size) void =>
+		f(threads[current].id: size);
+	};
+};
+
 export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
@@ -56,6 +67,7 @@ export fn alive(id: size) bool = id < nthreads && threads[id].alive;
 
 export fn retire() void = {
 	threads[current].alive = false;
+	call_reap();
 };
 
 fn put(fp: uintptr, off: uintptr, v: u64) void = {
@@ -204,5 +216,6 @@ export fn tick(regs: *arch::registers) uintptr = {
 // Terminates the running thread after a fault and returns the next frame.
 export fn fault_kill() uintptr = {
 	threads[current].alive = false;
+	call_reap();
 	return pick_next();
 };
