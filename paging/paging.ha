@@ -86,3 +86,22 @@ export fn flush(vaddr: u64) void = {
 export fn leave(space: uintptr) void = {
 	arch::write_cr3(space);
 };
+
+// Frees every frame mapped in the user window plus the page tables of the
+// address space itself. Never call this on the space while it is loaded.
+export fn space_free(space: uintptr) void = {
+	const pml4 = space;
+	const pdpt = (get(pml4, 0) & ~0xFFF): uintptr;
+	const pd = (get(pdpt, 0) & ~0xFFF): uintptr;
+	const pt = (get(pd, 2) & ~0xFFF): uintptr;
+	for (let i = 0u64; i < 512; i += 1) {
+		const e = get(pt, i);
+		if ((e & ENTRY_P) != 0 && (e & ENTRY_U) != 0) {
+			mem::release((e & ~0xFFF): uintptr);
+		};
+	};
+	mem::release(pt);
+	mem::release(pd);
+	mem::release(pdpt);
+	mem::release(pml4);
+};

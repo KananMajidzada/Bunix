@@ -66,7 +66,9 @@ working after the switch, while a private 2 MiB window at `0x400000` is mapped
 user-accessible through a dedicated page table. The scheduler loads the right
 page tables on each switch. User memory is handed out by mapping fresh frames
 into that window. A process that touches supervisor memory or an unmapped
-address is killed, and the rest of the system keeps running.
+address is killed, and the rest of the system keeps running. When a process
+exits or is killed, its page tables, every frame mapped into its window, its
+kernel stack, and its private file nodes go back to their allocators.
 
 ## Namespaces
 
@@ -95,8 +97,9 @@ physical frame allocator, timer interrupts with an IDT, a runtime heap, kernel
 threads, a first userspace process, per-process address spaces, several
 processes running at once, a user-mode init with an interactive shell, an
 in-memory file tree served over the Bunix File Protocol with create, read,
-write, and remove, and a per-process namespace that binds in the shared /dev
-and /proc while giving every process private space of its own.
+write, and remove, a per-process namespace that binds in the shared /dev and
+/proc while giving every process private space of its own, and full
+reclamation of a process's memory, page tables, and files when it leaves.
 
 Next: the port environment, and a filesystem that outlives the machine.
 

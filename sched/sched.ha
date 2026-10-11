@@ -40,6 +40,23 @@ fn call_reap() void = {
 	};
 };
 
+// Returns a dead user thread's kernel stack, heap, address space, and all
+// frames mapped into it. Kernel threads (space == 0) are left alone.
+fn free_user(id: size) void = {
+	const t = &threads[id];
+	if (t.space == 0) {
+		return;
+	};
+	for (let i = 0u64; i < STACK_PAGES; i += 1) {
+		mem::release(t.stack + (i * 4096): uintptr);
+	};
+	paging::space_free(t.space);
+	t.stack = 0;
+	t.space = 0;
+	t.heap = 0;
+	t.heap_end = 0;
+};
+
 export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
@@ -67,6 +84,7 @@ export fn alive(id: size) bool = id < nthreads && threads[id].alive;
 
 export fn retire() void = {
 	threads[current].alive = false;
+	free_user(current);
 	call_reap();
 };
 
@@ -216,6 +234,7 @@ export fn tick(regs: *arch::registers) uintptr = {
 // Terminates the running thread after a fault and returns the next frame.
 export fn fault_kill() uintptr = {
 	threads[current].alive = false;
+	free_user(current);
 	call_reap();
 	return pick_next();
 };
