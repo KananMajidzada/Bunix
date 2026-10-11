@@ -62,14 +62,21 @@ the console and offers:
 
 `user <path>` runs another copy of the program against a path, `user /bad`
 demonstrates the protection boundary (the process is killed for touching
-supervisor memory), and `multi` runs three programs at once. If init exits, the
-kernel restarts it.
+supervisor memory), `user /ns` shows the process's own file namespace, and
+`multi` runs three programs at once. If init exits, the kernel restarts it.
+
+Each freshly spawned process gets a namespace of its own: `/dev` and `/proc`
+are bound in from the shared tree, a `/tmp` is private to the process, and
+anything else it creates is invisible to every other process. The init shell
+sees the shared namespace. `version` prints the rabbit next to live facts about
+the system.
 
 The file namespace is read and written over BFP. Files under `/dev` and `/proc`
 are served from the kernel: `/dev/note` is a writable store, `/dev/cons` echoes
 writes to the console, and `/proc/*` reports live facts. `ls`, `cat`, `write`,
 `mkdir`, `touch`, and `rm` walk that namespace through the protocol from
-userspace and create or remove files in the in-memory tree.
+userspace and create or remove files in the in-memory tree. Every process
+carries its own namespace, so writes by one process never leak into another.
 
 User programs are freestanding Hare programs with their own runtime. They reach
 files through the `readfile` and `writefile` system calls, which travel the BFP

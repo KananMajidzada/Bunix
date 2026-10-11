@@ -68,6 +68,15 @@ page tables on each switch. User memory is handed out by mapping fresh frames
 into that window. A process that touches supervisor memory or an unmapped
 address is killed, and the rest of the system keeps running.
 
+## Namespaces
+
+Each process also carries a file namespace: its own handle table and its own
+flavor of the root directory. `init` and the kernel live on the shared root,
+which holds `/dev`, `/proc`, and the files anyone creates there. A freshly
+spawned process instead gets a private root with `/dev` and `/proc` bound in
+and its own `/tmp`, so its files are private to it. The BFP server keeps one
+handle table per namespace and starts every attach at that namespace's root.
+
 ## Conventions
 
 The tree follows the upstream Hare style guide, with a few local habits kept
@@ -84,17 +93,19 @@ consistent everywhere:
 Done: the boot path, serial and VGA consoles, the Multiboot memory map, a
 physical frame allocator, timer interrupts with an IDT, a runtime heap, kernel
 threads, a first userspace process, per-process address spaces, several
-processes running at once, a user-mode init with an interactive shell, and an
+processes running at once, a user-mode init with an interactive shell, an
 in-memory file tree served over the Bunix File Protocol with create, read,
-write, and remove.
+write, and remove, and a per-process namespace that binds in the shared /dev
+and /proc while giving every process private space of its own.
 
-Next: per-process namespaces, then the port environment.
+Next: the port environment, and a filesystem that outlives the machine.
 
 ## Roadmap
 
 1. Console, memory map, and a physical page allocator. [done]
 2. Interrupts, a timer, and a scheduler. [done]
 3. Kernel threads and a first userspace process. [done]
-4. A file-server core and a per-process namespace. [file-server core done]
+4. A file-server core and a per-process namespace. [done]
 5. `/dev`, `/proc`, and an init process. [done]
 6. The port environment: a POSIX library, a shell, and a C compiler driver.
+7. A filesystem with persistence.

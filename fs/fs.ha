@@ -5,9 +5,10 @@ use mem;
 use sched;
 use sys;
 
-def MAXNODE: size = 64;
+def MAXNODE: size = 128;
 def MAXHANDLE: size = 16;
 def MAXCHILD: size = 8;
+def MAXNS: size = 8;
 def BUFSZ: size = 2048;
 def NOCHILD: size = ~0z;
 
@@ -25,13 +26,19 @@ export type node = struct {
 	wbuf: [BUFSZ]u8,
 };
 
-type slot = struct {
-	inuse: bool,
-	node: size,
+export type ns = struct {
+	root: size,
+	inuse: [MAXHANDLE]bool,
+	hnode: [MAXHANDLE]size,
 };
 
-type server = struct {
-	handles: [MAXHANDLE]slot,
+fn hold(s: *ns, fid: size, node: size) void = {
+	s.inuse[fid] = true;
+	s.hnode[fid] = node;
+};
+
+fn hget(s: *ns, fid: size) size = {
+	return s.hnode[fid];
 };
 
 let nodes: [MAXNODE]node = [node {
@@ -41,9 +48,13 @@ let nodes: [MAXNODE]node = [node {
 }...];
 let nnodes: size = 0;
 let root: size = 0;
-let srv = server {
-	handles = [slot { inuse = false, node = 0 }...],
-};
+let devroot: size = 0;
+let procroot: size = 0;
+let nss: [MAXNS]ns = [ns {
+	root = 0,
+	inuse = [false...],
+	hnode = [0...],
+}...];
 
 let reqbuf: [BUFSZ]u8 = [0...];
 let resbuf: [BUFSZ]u8 = [0...];
@@ -204,6 +215,8 @@ export fn init() void = {
 	root = mknode("/", true);
 	const dev = mknode("dev", true);
 	const proc = mknode("proc", true);
+	devroot = dev;
+	procroot = proc;
 	link(root, dev);
 	link(root, proc);
 
@@ -236,6 +249,37 @@ export fn init() void = {
 	const threads = mknode("threads", false);
 	nodes[threads].gen = &gen_threads;
 	link(proc, threads);
+
+	nss[0].root = root;
+};
+
+export fn cur() *ns = {
+	const id = sched::running(): size;
+	if (id >= MAXNS) {
+		return &nss[0];
+	};
+	return &nss[id];
+};
+
+// A fresh namespace keeps the shared /dev and /proc as binds and adds its own
+// writable /tmp; everything else the process makes stays private to it.
+fn ns_root_make() size = {
+	const r = mknode("/", true);
+	link(r, devroot);
+	link(r, procroot);
+	link(r, mknode("tmp", true));
+	return r;
+};
+
+export fn ns_install(id: size, fresh: bool) void = {
+	if (id >= MAXNS) {
+		return;
+	};
+	nss[id] = ns {
+		root = if (fresh) ns_root_make() else root,
+		inuse = [false...],
+		hnode = [0...],
+	};
 };
 
 fn name_eq(a: str, b: []u8) bool = {
@@ -309,24 +353,24 @@ fn do_proto(w: *bfp::writer, r: *bfp::reader) void = {
 	bfp::w_str(w, bfp::REVISION);
 };
 
-fn do_attach(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_attach(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	_ = bfp::r_u32(r);
 	_ = bfp::r_bytes(r);
 	_ = bfp::r_bytes(r);
-	s.handles[fid: size] = slot { inuse = true, node = root };
-	put_ident(w, root, bfp::IDDIR);
+	hold(s, fid: size, s.root);
+	put_ident(w, s.root, bfp::IDDIR);
 };
 
-fn do_walk(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_walk(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	const newfid = bfp::r_u32(r);
 	const count = bfp::r_u16(r);
 	if (count == 1) {
 		const name = bfp::r_bytes(r);
-		const child = find(s.handles[fid: size].node, name);
+		const child = find(hget(s, fid: size), name);
 		if (child != NOCHILD) {
-			s.handles[newfid: size] = slot { inuse = true, node = child };
+			hold(s, newfid: size, child);
 			bfp::w_u16(w, 1);
 			put_ident(w, child, kind_of(child));
 			return;
@@ -335,19 +379,19 @@ fn do_walk(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 	bfp::w_u16(w, 0);
 };
 
-fn do_open(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_open(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	_ = bfp::r_u8(r);
-	const id = s.handles[fid: size].node;
+	const id = hget(s, fid: size);
 	put_ident(w, id, kind_of(id));
 	bfp::w_u32(w, 0);
 };
 
-fn do_read(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_read(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	_ = bfp::r_u64(r);
 	const count = bfp::r_u32(r): size;
-	const id = s.handles[fid: size].node;
+	const id = hget(s, fid: size);
 	let data: []u8 = [];
 	if (nodes[id].isdir) {
 		data = listdir(id);
@@ -370,16 +414,16 @@ fn do_read(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 	bfp::w_bytes(w, data[..n]);
 };
 
-fn do_clunk(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_clunk(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
-	s.handles[fid: size].inuse = false;
+	s.inuse[fid: size] = false;
 };
 
-fn do_write(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_write(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	const off = bfp::r_u64(r): size;
 	const data = bfp::r_bytes(r);
-	const id = s.handles[fid: size].node;
+	const id = hget(s, fid: size);
 	match (nodes[id].wdev) {
 	case null => void;
 	case let f: *fn(buf: []u8) size =>
@@ -405,11 +449,11 @@ fn do_write(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 	bfp::w_u32(w, n: u32);
 };
 
-fn do_create(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_create(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
 	const name = bfp::r_bytes(r);
 	const isdir = bfp::r_u8(r) != 0;
-	const nd = &nodes[s.handles[fid: size].node];
+	const nd = &nodes[hget(s, fid: size)];
 	if (!nd.isdir || nd.nchild >= MAXCHILD || nnodes >= MAXNODE) {
 		put_ident(w, bfp::NOHANDLE: size, 0);
 		return;
@@ -418,21 +462,21 @@ fn do_create(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
 		put_ident(w, bfp::NOHANDLE: size, 0);
 		return;
 	};
-	if (find(s.handles[fid: size].node, name) != NOCHILD) {
+	if (find(hget(s, fid: size), name) != NOCHILD) {
 		put_ident(w, bfp::NOHANDLE: size, 0);
 		return;
 	};
-	const parent = s.handles[fid: size].node;
+	const parent = hget(s, fid: size);
 	const child = mknode(*(&name: *str), isdir);
 	nodes[child].writable = !isdir;
 	link(parent, child);
 	put_ident(w, child, kind_of(child));
 };
 
-fn do_remove(s: *server, w: *bfp::writer, r: *bfp::reader) void = {
+fn do_remove(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
-	const id = s.handles[fid: size].node;
-	if (id == root || (nodes[id].isdir && nodes[id].nchild > 0)) {
+	const id = hget(s, fid: size);
+	if (id == s.root || (nodes[id].isdir && nodes[id].nchild > 0)) {
 		bfp::w_u32(w, 0);
 		return;
 	};
@@ -456,7 +500,7 @@ fn do_error(w: *bfp::writer, tag: u16) void = {
 	bfp::w_str(w, "unsupported");
 };
 
-fn handle(s: *server, in: []u8, out: []u8) size = {
+fn handle(s: *ns, in: []u8, out: []u8) size = {
 	const h = bfp::parse_header(in);
 	let r = bfp::reader { buf = in, off = bfp::HDR };
 	let w = bfp::writer { buf = out, off = 0 };
@@ -486,32 +530,32 @@ fn handle(s: *server, in: []u8, out: []u8) size = {
 	return bfp::finish(&w);
 };
 
-fn send(w: *bfp::writer) []u8 = {
+fn send(s: *ns, w: *bfp::writer) []u8 = {
 	const n = bfp::finish(w);
-	const rn = handle(&srv, w.buf[..n], resbuf[..]);
+	const rn = handle(s, w.buf[..n], resbuf[..]);
 	return resbuf[..rn];
 };
 
-fn proto() void = {
+fn proto(s: *ns) void = {
 	let w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TPROTO, bfp::NOTAG);
 	bfp::w_u32(&w, BUFSZ: u32);
 	bfp::w_str(&w, bfp::REVISION);
-	_ = send(&w);
+	_ = send(s, &w);
 };
 
-fn attach() u32 = {
+fn attach(s: *ns) u32 = {
 	let w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TATTACH, 0);
 	bfp::w_u32(&w, 0);
 	bfp::w_u32(&w, bfp::NOHANDLE);
 	bfp::w_str(&w, "bunix");
 	bfp::w_str(&w, "");
-	_ = send(&w);
+	_ = send(s, &w);
 	return 0;
 };
 
-fn walk1(fid: u32, newfid: u32, name: []u8) bool = {
+fn walk1(s: *ns, fid: u32, newfid: u32, name: []u8) bool = {
 	let w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TWALK, 1);
 	bfp::w_u32(&w, fid);
@@ -519,21 +563,21 @@ fn walk1(fid: u32, newfid: u32, name: []u8) bool = {
 	bfp::w_u16(&w, 1);
 	bfp::w_u16(&w, len(name): u16);
 	bfp::w_bytes(&w, name);
-	const resp = send(&w);
+	const resp = send(s, &w);
 	let r = bfp::reader { buf = resp, off = bfp::HDR };
 	return bfp::r_u16(&r) == 1;
 };
 
-fn walkpath(path: []u8) u32 = {
-	proto();
-	let fid = attach();
+fn walkpath(s: *ns, path: []u8) u32 = {
+	proto(s);
+	let fid = attach(s);
 	let nextfid: u32 = 1;
 	let start = 0z;
 	for (let i = 0z; i <= len(path); i += 1) {
 		if (i == len(path) || path[i] == ('/': u8)) {
 			if (i > start) {
 				const name = path[start..i];
-				if (!walk1(fid, nextfid, name)) {
+				if (!walk1(s, fid, nextfid, name)) {
 					return bfp::NOHANDLE;
 				};
 				fid = nextfid;
@@ -545,19 +589,19 @@ fn walkpath(path: []u8) u32 = {
 	return fid;
 };
 
-fn read_all(fid: u32) []u8 = {
+fn read_all(s: *ns, fid: u32) []u8 = {
 	let w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TOPEN, 2);
 	bfp::w_u32(&w, fid);
 	bfp::w_u8(&w, 0);
-	_ = send(&w);
+	_ = send(s, &w);
 
 	w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TREAD, 3);
 	bfp::w_u32(&w, fid);
 	bfp::w_u64(&w, 0);
 	bfp::w_u32(&w, BUFSZ: u32);
-	const resp = send(&w);
+	const resp = send(s, &w);
 	let r = bfp::reader { buf = resp, off = bfp::HDR };
 	const count = bfp::r_u32(&r): size;
 	for (let i = 0z; i < count; i += 1) {
@@ -567,28 +611,31 @@ fn read_all(fid: u32) []u8 = {
 	w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TCLUNK, 4);
 	bfp::w_u32(&w, fid);
-	_ = send(&w);
+	_ = send(s, &w);
 
 	return filebuf[..count];
 };
 
 export fn cat(path: str) []u8 = {
+	const s = cur();
 	const p = *(&path: *[]u8);
-	const fid = walkpath(p);
+	const fid = walkpath(s, p);
 	if (fid == bfp::NOHANDLE) {
 		return filebuf[..0];
 	};
-	return read_all(fid);
+	return read_all(s, fid);
 };
 
 export fn exists(path: str) bool = {
+	const s = cur();
 	const p = *(&path: *[]u8);
-	return walkpath(p) != bfp::NOHANDLE;
+	return walkpath(s, p) != bfp::NOHANDLE;
 };
 
 export fn write_file(path: str, data: []u8) size = {
+	const s = cur();
 	const p = *(&path: *[]u8);
-	const fid = walkpath(p);
+	const fid = walkpath(s, p);
 	if (fid == bfp::NOHANDLE) {
 		return 0;
 	};
@@ -597,7 +644,7 @@ export fn write_file(path: str, data: []u8) size = {
 	bfp::begin(&w, bfp::TOPEN, 5);
 	bfp::w_u32(&w, fid);
 	bfp::w_u8(&w, 1);
-	_ = send(&w);
+	_ = send(s, &w);
 
 	w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TWRITE, 6);
@@ -605,19 +652,20 @@ export fn write_file(path: str, data: []u8) size = {
 	bfp::w_u64(&w, 0);
 	bfp::w_u16(&w, len(data): u16);
 	bfp::w_bytes(&w, data);
-	const resp = send(&w);
+	const resp = send(s, &w);
 	let r = bfp::reader { buf = resp, off = bfp::HDR };
 	const n = bfp::r_u32(&r): size;
 
 	w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TCLUNK, 7);
 	bfp::w_u32(&w, fid);
-	_ = send(&w);
+	_ = send(s, &w);
 
 	return n;
 };
 
 export fn create(path: str, isdir: bool) bool = {
+	const s = cur();
 	const p = *(&path: *[]u8);
 	let slash = NOCHILD;
 	for (let i = 0z; i < len(p); i += 1) {
@@ -633,7 +681,7 @@ export fn create(path: str, isdir: bool) bool = {
 	if (len(base) == 0) {
 		return false;
 	};
-	const fid = walkpath(*(&parent: *[]u8));
+	const fid = walkpath(s, *(&parent: *[]u8));
 	if (fid == bfp::NOHANDLE) {
 		return false;
 	};
@@ -644,7 +692,7 @@ export fn create(path: str, isdir: bool) bool = {
 	bfp::w_u16(&w, len(base): u16);
 	bfp::w_bytes(&w, base);
 	bfp::w_u8(&w, if (isdir) 1 else 0);
-	const resp = send(&w);
+	const resp = send(s, &w);
 	let r = bfp::reader { buf = resp, off = bfp::HDR };
 	_ = bfp::r_u8(&r);
 	_ = bfp::r_u32(&r);
@@ -653,14 +701,15 @@ export fn create(path: str, isdir: bool) bool = {
 	w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TCLUNK, 9);
 	bfp::w_u32(&w, fid);
-	_ = send(&w);
+	_ = send(s, &w);
 
 	return nid != (bfp::NOHANDLE: u64);
 };
 
 export fn remove(path: str) bool = {
+	const s = cur();
 	const p = *(&path: *[]u8);
-	const fid = walkpath(p);
+	const fid = walkpath(s, p);
 	if (fid == bfp::NOHANDLE) {
 		return false;
 	};
@@ -668,14 +717,14 @@ export fn remove(path: str) bool = {
 	let w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TREMOVE, 8);
 	bfp::w_u32(&w, fid);
-	const resp = send(&w);
+	const resp = send(s, &w);
 	let r = bfp::reader { buf = resp, off = bfp::HDR };
 	const ok = bfp::r_u32(&r);
 
 	w = bfp::writer { buf = reqbuf[..], off = 0 };
 	bfp::begin(&w, bfp::TCLUNK, 9);
 	bfp::w_u32(&w, fid);
-	_ = send(&w);
+	_ = send(s, &w);
 
 	return ok != 0;
 };

@@ -1,3 +1,4 @@
+use fs;
 use mem;
 use paging;
 use sched;
@@ -17,7 +18,12 @@ export fn reserve() void = {
 	mem::reserve(BASE: uintptr, 0x400000);
 };
 
-export fn run(path: str) size = {
+export fn run(path: str) size = run_with(path, false);
+
+// Starts a process with a fresh namespace of its own.
+export fn run_fresh(path: str) size = run_with(path, true);
+
+fn run_with(path: str, fresh: bool) size = {
 	const space = paging::space_new();
 	if (space == 0) {
 		return sched::NOID;
@@ -62,7 +68,7 @@ export fn run(path: str) size = {
 		*((aframe + (i: uintptr)): *u8) = b[i];
 	};
 
-	return sched::spawn_user(
+	const id = sched::spawn_user(
 		user::entry: uintptr,
 		STACK_TOP: uintptr,
 		ARG: uintptr,
@@ -71,4 +77,8 @@ export fn run(path: str) size = {
 		image_end: uintptr,
 		HEAP_END: uintptr,
 	);
+	if (id != sched::NOID) {
+		fs::ns_install(id, fresh);
+	};
+	return id;
 };

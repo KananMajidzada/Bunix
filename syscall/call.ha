@@ -70,7 +70,7 @@ fn removepath(regs: *arch::registers) u64 = {
 
 fn spawnpath(regs: *arch::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
-	return loader::run(path): u64;
+	return loader::run_fresh(path): u64;
 };
 
 fn handle(regs: *arch::registers) uintptr = {

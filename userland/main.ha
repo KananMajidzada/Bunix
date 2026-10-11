@@ -44,6 +44,24 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 
+	if (rt::strcmp(a, "/ns")) {
+		rt::println("namespace view of / :");
+		let out: [256]u8 = [0...];
+		let k = rt::readfile("/", out[..]);
+		rt::write(out[..k]);
+		const marker: str = "sealed with a private marker\n";
+		_ = rt::create("/pp");
+		_ = rt::writefile("/pp", *(&marker: *[]u8));
+		k = rt::readfile("/pp", out[..]);
+		rt::print("read back: ");
+		rt::write(out[..k]);
+		k = rt::readfile("/hello", out[..]);
+		rt::print("shared /hello bytes: ");
+		rt::printnum(k: u64);
+		rt::println("");
+		return;
+	};
+
 	if (starts(a, "/spin ")) {
 		for (let i = 0u64; i < 4; i += 1) {
 			rt::print(a);
