@@ -23,7 +23,14 @@ The result is a Multiboot ELF named `bunix`.
 	qemu-system-x86_64 -m 256 -kernel bunix -serial stdio
 
 or `make run`. The kernel writes its boot log to both the VGA text console and
-COM1.
+COM1. An optional raw disk image plugged into the IDE controller gives the
+kernel some block storage:
+
+	qemu-system-x86_64 -m 256 -kernel bunix -drive file=disk.raw,format=raw,if=ide
+
+The boot log then reports the disk, and `/dev/disk` reads and writes whole
+sectors of it. Writes survive a reboot, so something parked on the disk is
+still there next boot.
 
 ## Layout
 
@@ -36,6 +43,7 @@ COM1.
 | `mem/`      | Physical frame allocator                        |
 | `paging/`   | Per-process page tables and address spaces      |
 | `bfp/`      | Bunix File Protocol: wire format, server, client |
+| `block/`    | ATA PIO driver for the primary IDE controller  |
 | `fs/`       | In-kernel file namespace served over BFP        |
 | `sys/`      | System name and version                         |
 | `console/`  | Serial, VGA text, and keyboard                  |
@@ -73,10 +81,12 @@ the system.
 
 The file namespace is read and written over BFP. Files under `/dev` and `/proc`
 are served from the kernel: `/dev/note` is a writable store, `/dev/cons` echoes
-writes to the console, and `/proc/*` reports live facts. `ls`, `cat`, `write`,
-`mkdir`, `touch`, and `rm` walk that namespace through the protocol from
-userspace and create or remove files in the in-memory tree. Every process
-carries its own namespace, so writes by one process never leak into another.
+writes to the console, `/dev/disk` reads and writes raw sectors of an IDE
+drive through the ATA PIO driver, and `/proc/*` reports live facts. `ls`,
+`cat`, `write`, `mkdir`, `touch`, and `rm` walk that namespace through the
+protocol from userspace and create or remove files in the in-memory tree. Every
+process carries its own namespace, so writes by one process never leak into
+another.
 
 User programs are freestanding Hare programs with their own runtime. They reach
 files through the `readfile` and `writefile` system calls, which travel the BFP
@@ -86,4 +96,5 @@ system call, and print through a `write` system call.
 
 ![boot](doc/boot.png)
 
-There is no filesystem persistence yet. See `DESIGN.md` for where it is going.
+The in-memory file tree is not yet laid out on the disk; `/dev/disk` is raw
+block access. See `DESIGN.md` for where persistence is going.
