@@ -65,6 +65,21 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 
+	if (rt::strcmp(a, "/disk")) {
+		let out: [512]u8 = [0...];
+		const k = rt::readfile("/dev/disk", out[..]);
+		rt::print("sector 0 holds ");
+		rt::printnum(k: u64);
+		rt::print(" bytes: ");
+		let n = 0z;
+		for (n < k && out[n] != ('\n': u8) && out[n] != 0) {
+			rt::putc(out[n]);
+			n += 1;
+		};
+		rt::println("");
+		return;
+	};
+
 	if (starts(a, "/spin ")) {
 		for (let i = 0u64; i < 4; i += 1) {
 			rt::print(a);

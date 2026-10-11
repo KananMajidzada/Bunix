@@ -28,6 +28,24 @@ arch.inw:
 	inw %dx, %ax
 	ret
 
+.global arch.insl
+arch.insl:
+	movl %edx, %ecx
+	movw %di, %dx
+	movq %rsi, %rdi
+	cld
+	rep insl (%dx), %es:(%rdi)
+	ret
+
+.global arch.outsl
+arch.outsl:
+	movl %edx, %ecx
+	movw %di, %dx
+	movq %rsi, %rdi
+	cld
+	rep outsl %ds:(%rsi), (%dx)
+	ret
+
 .global arch.cli
 arch.cli:
 	cli

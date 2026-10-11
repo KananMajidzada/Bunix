@@ -1,4 +1,5 @@
 use arch;
+use block;
 use boot;
 use console;
 use fs;
@@ -64,6 +65,15 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	console::print(" free of ");
 	console::printnum(mem::total_frames());
 	console::println("");
+
+	console::print("disk:      ");
+	if (block::present_drive()) {
+		console::print("present, ");
+		console::printnum(block::nsect());
+		console::println(" sectors");
+	} else {
+		console::println("none");
+	};
 
 	arch::fault_hook = &on_fault;
 	arch::idt_init();

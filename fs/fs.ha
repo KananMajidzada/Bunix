@@ -1,5 +1,6 @@
 use arch;
 use bfp;
+use block;
 use console;
 use mem;
 use sched;
@@ -20,8 +21,10 @@ export type node = struct {
 	children: [MAXCHILD]size,
 	content: str,
 	gen: nullable *fn(buf: []u8) size,
+	gdsk: nullable *fn(buf: []u8, off: u64, n: size) size,
 	writable: bool,
 	wdev: nullable *fn(buf: []u8) size,
+	wdsk: nullable *fn(data: []u8, off: u64) size,
 	wlen: size,
 	wbuf: [BUFSZ]u8,
 };
@@ -48,8 +51,8 @@ let nused: size = 0;
 
 let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
-	content = "", gen = null, writable = false, wdev = null,
-	wlen = 0, wbuf = [0...],
+	content = "", gen = null, gdsk = null, writable = false, wdev = null,
+	wdsk = null, wlen = 0, wbuf = [0...],
 }...];
 let nnodes: size = 0;
 let root: size = 0;
@@ -89,8 +92,10 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.children = [0...];
 	nd.content = "";
 	nd.gen = null;
+	nd.gdsk = null;
 	nd.writable = false;
 	nd.wdev = null;
+	nd.wdsk = null;
 	nd.wlen = 0;
 	nd.wbuf = [0...];
 	nused += 1;
@@ -259,6 +264,51 @@ fn gen_files(buf: []u8) size = {
 	return n;
 };
 
+def LSZ: u64 = 512;
+
+fn disk_gen(buf: []u8, off: u64, n: size) size = {
+	let got = 0z;
+	let s = off / LSZ;
+	let p = (off % LSZ): size;
+	let local: [512]u8 = [0...];
+	for (got < n && s < block::nsect()) {
+		if (!block::read(s, local[..])) {
+			break;
+		};
+		const take = if (512 - p < n - got) 512 - p else n - got;
+		for (let j = 0z; j < take; j += 1) {
+			buf[got + j] = local[p + j];
+		};
+		got += take;
+		s += 1;
+		p = 0;
+	};
+	return got;
+};
+
+fn disk_wdev(data: []u8, off: u64) size = {
+	let wrote = 0z;
+	let s = off / LSZ;
+	let p = (off % LSZ): size;
+	let local: [512]u8 = [0...];
+	for (wrote < len(data) && s < block::nsect()) {
+		if (!block::read(s, local[..])) {
+			break;
+		};
+		const take = if (512 - p < len(data) - wrote) 512 - p else len(data) - wrote;
+		for (let j = 0z; j < take; j += 1) {
+			local[p + j] = data[wrote + j];
+		};
+		if (!block::write(s, local[..])) {
+			break;
+		};
+		wrote += take;
+		s += 1;
+		p = 0;
+	};
+	return wrote;
+};
+
 export fn init() void = {
 	root = mknode("/", true);
 	const dev = mknode("dev", true);
@@ -281,6 +331,11 @@ export fn init() void = {
 	const note = mknode("note", false);
 	nodes[note].writable = true;
 	link(dev, note);
+
+	const disk = mknode("disk", false);
+	nodes[disk].gdsk = &disk_gen;
+	nodes[disk].wdsk = &disk_wdev;
+	link(dev, disk);
 
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
@@ -469,8 +524,10 @@ fn do_open(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 
 fn do_read(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const fid = bfp::r_u32(r);
-	_ = bfp::r_u64(r);
+	const off = bfp::r_u64(r);
 	const count = bfp::r_u32(r): size;
+	// Keep the whole reply inside the response buffer, framing included.
+	const cap = if (count > BUFSZ - 64) BUFSZ - 64 else count;
 	const id = hget(s, fid: size);
 	let data: []u8 = [];
 	if (nodes[id].isdir) {
@@ -478,17 +535,22 @@ fn do_read(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	} else if (nodes[id].writable) {
 		data = nodes[id].wbuf[..nodes[id].wlen];
 	} else {
-		match (nodes[id].gen) {
+		match (nodes[id].gdsk) {
 		case null =>
-			data = *(&nodes[id].content: *[]u8);
-		case let g: *fn(buf: []u8) size =>
-			const k = g(scratch[..]);
-			data = scratch[..k];
+			match (nodes[id].gen) {
+			case null =>
+				data = *(&nodes[id].content: *[]u8);
+			case let g: *fn(buf: []u8) size =>
+				const k = g(scratch[..]);
+				data = scratch[..k];
+			};
+		case let g: *fn(buf: []u8, off: u64, n: size) size =>
+			data = scratch[..g(scratch[..], off, cap)];
 		};
 	};
 	let n = len(data);
-	if (n > count) {
-		n = count;
+	if (n > cap) {
+		n = cap;
 	};
 	bfp::w_u32(w, n: u32);
 	bfp::w_bytes(w, data[..n]);
@@ -509,6 +571,12 @@ fn do_write(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	case let f: *fn(buf: []u8) size =>
 		_ = f(data);
 		bfp::w_u32(w, len(data): u32);
+		return;
+	};
+	match (nodes[id].wdsk) {
+	case null => void;
+	case let f: *fn(data: []u8, off: u64) size =>
+		bfp::w_u32(w, f(data, off): u32);
 		return;
 	};
 	if (!nodes[id].writable || off >= BUFSZ) {
