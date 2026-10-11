@@ -111,14 +111,67 @@ fn put_num(buf: []u8, v: u64) size = {
 	return k;
 };
 
+def ARTPAD: size = 15;
+
+fn version_info(buf: []u8, n: size, line: size) size = {
+	let m = n;
+	switch (line) {
+	case 0 =>
+		m += put_str(buf[m..], "bunix@bunix");
+	case 1 =>
+		m += put_str(buf[m..], "-----------");
+	case 2 =>
+		m += put_str(buf[m..], "OS: ");
+		m += put_str(buf[m..], sys::NAME);
+		buf[m] = ' ': u8;
+		m += 1;
+		m += put_str(buf[m..], sys::VERSION);
+	case 3 =>
+		m += put_str(buf[m..], "Kernel: ");
+		m += put_str(buf[m..], sys::NAME);
+		buf[m] = ' ': u8;
+		m += 1;
+		m += put_str(buf[m..], sys::VERSION);
+	case 4 =>
+		m += put_str(buf[m..], "Uptime: ");
+		m += put_num(buf[m..], arch::seconds());
+		buf[m] = 's': u8;
+		m += 1;
+	case 5 =>
+		m += put_str(buf[m..], "Memory: ");
+		m += put_num(buf[m..], mem::free_frames());
+		m += put_str(buf[m..], " free of ");
+		m += put_num(buf[m..], mem::total_frames());
+	case 6 =>
+		m += put_str(buf[m..], "Threads: ");
+		m += put_num(buf[m..], sched::live(): u64);
+	case 7 =>
+		m += put_str(buf[m..], "Shell: ush");
+	case 8 =>
+		m += put_str(buf[m..], "Init: /sh");
+	case => void;
+	};
+	return m;
+};
+
 fn gen_version(buf: []u8) size = {
-	let n = put_str(buf, sys::BANNER);
-	n += put_str(buf[n..], sys::NAME);
-	buf[n] = ' ': u8;
-	n += 1;
-	n += put_str(buf[n..], sys::VERSION);
-	buf[n] = '\n': u8;
-	n += 1;
+	let n = 0z;
+	for (let i = 0z; i < len(sys::ART); i += 1) {
+		const a = *(&sys::ART[i]: *[]u8);
+		for (let j = 0z; j < len(a); j += 1) {
+			buf[n] = a[j];
+			n += 1;
+		};
+		let col = len(a);
+		for (col < ARTPAD) {
+			buf[n] = ' ': u8;
+			n += 1;
+			col += 1;
+		};
+		n = version_info(buf, n, i);
+		buf[n] = '\n': u8;
+		n += 1;
+	};
 	return n;
 };
 

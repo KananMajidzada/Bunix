@@ -56,7 +56,7 @@ fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
 		console::println("commands: help, version, echo, clear, ls, cat, write, mkdir, touch, rm, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, sh, fault, halt");
 	} else if (eq(line, "version")) {
-		console::print(sys::BANNER);
+		sys::banner();
 		console::print(sys::NAME);
 		console::print(" ");
 		console::println(sys::VERSION);

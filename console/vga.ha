@@ -38,6 +38,13 @@ export fn vga_putc(ch: u8) void = {
 		col = 0;
 	} else if (ch == '\r': u8) {
 		col = 0;
+	} else if (ch == '\b': u8) {
+		if (col > 0) {
+			col -= 1;
+		} else if (row > 0) {
+			row -= 1;
+			col = COLS - 1;
+		};
 	} else {
 		*cell(row, col) = ATTR | (ch: u16);
 		col += 1;
