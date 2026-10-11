@@ -27,6 +27,9 @@ export type node = struct {
 	wdsk: nullable *fn(data: []u8, off: u64) size,
 	wlen: size,
 	wbuf: [BUFSZ]u8,
+	disk: bool,
+	dblock: u32,
+	dlen: u32,
 };
 
 export type ns = struct {
@@ -52,7 +55,7 @@ let nused: size = 0;
 let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
 	content = "", gen = null, gdsk = null, writable = false, wdev = null,
-	wdsk = null, wlen = 0, wbuf = [0...],
+	wdsk = null, wlen = 0, wbuf = [0...], disk = false, dblock = 0, dlen = 0,
 }...];
 let nnodes: size = 0;
 let root: size = 0;
@@ -69,6 +72,11 @@ let reqbuf: [BUFSZ]u8 = [0...];
 let resbuf: [BUFSZ]u8 = [0...];
 let scratch: [BUFSZ]u8 = [0...];
 let filebuf: [BUFSZ]u8 = [0...];
+
+def DROOT: u32 = 1;
+def DBLK: u32 = 4;
+let dnext: u32 = DROOT + 1;
+let mntroot: size = 0;
 
 fn mknode(name: str, isdir: bool) size = {
 	const id = if (freehead != NOCHILD) {
@@ -98,6 +106,9 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.wdsk = null;
 	nd.wlen = 0;
 	nd.wbuf = [0...];
+	nd.disk = false;
+	nd.dblock = 0;
+	nd.dlen = 0;
 	nused += 1;
 	return id;
 };
@@ -309,6 +320,186 @@ fn disk_wdev(data: []u8, off: u64) size = {
 	return wrote;
 };
 
+// Byte-order helpers for the on-disk format. The superblock lives in sector 0:
+// magic "BUNX2" at byte 0, the root directory block at byte 8, the next free
+// block at byte 12. A directory block is a count byte followed by 42-byte
+// entries: type, name length, name, data block, length in bytes.
+fn wle(b: []u8, off: size, v: u32) void = {
+	b[off] = v: u8;
+	b[off + 1] = (v >> 8): u8;
+	b[off + 2] = (v >> 16): u8;
+	b[off + 3] = (v >> 24): u8;
+};
+
+fn rle(b: []u8, off: size) u32 = {
+	return (b[off]: u32) | ((b[off + 1]: u32) << 8)
+		| ((b[off + 2]: u32) << 16) | ((b[off + 3]: u32) << 24);
+};
+
+fn sb_write() void = {
+	let b: [512]u8 = [0...];
+	b[0] = 'B': u8;
+	b[1] = 'U': u8;
+	b[2] = 'N': u8;
+	b[3] = 'X': u8;
+	b[4] = '2': u8;
+	wle(b, 8, DROOT);
+	wle(b, 12, dnext);
+	block::write(0, b[..]);
+};
+
+fn sb_read() bool = {
+	let b: [512]u8 = [0...];
+	if (!block::read(0, b[..])) {
+		return false;
+	};
+	if (b[0] != 'B' || b[1] != 'U' || b[2] != 'N' || b[3] != 'X' || b[4] != '2') {
+		return false;
+	};
+	dnext = rle(b, 12);
+	return true;
+};
+
+fn dalloc() u32 = {
+	const blk = dnext;
+	dnext += 1;
+	sb_write();
+	return blk;
+};
+
+fn dfind_parent(id: size) size = {
+	for (let p = 0z; p < nnodes; p += 1) {
+		const nd = &nodes[p];
+		if (!nd.isdir) {
+			continue;
+		};
+		for (let i = 0z; i < nd.nchild; i += 1) {
+			if (nd.children[i] == id) {
+				return p;
+			};
+		};
+	};
+	return NOCHILD;
+};
+
+fn dsave_dir(id: size) void = {
+	const nd = &nodes[id];
+	let b: [512]u8 = [0...];
+	b[0] = nd.nchild: u8;
+	for (let i = 0z; i < nd.nchild; i += 1) {
+		const c = nd.children[i];
+		const cn = &nodes[c];
+		const off = 1 + i * 42;
+		b[off] = if (cn.isdir) 2 else 1;
+		b[off + 1] = cn.nlen: u8;
+		for (let j = 0z; j < cn.nlen && j < 32; j += 1) {
+			b[off + 2 + j] = cn.nam[j];
+		};
+		for (let j = cn.nlen; j < 32; j += 1) {
+			b[off + 2 + j] = 0;
+		};
+		wle(b, off + 34, cn.dblock);
+		wle(b, off + 38, cn.dlen);
+	};
+	block::write(nd.dblock: u64, b[..]);
+};
+
+fn dpull(id: size) void = {
+	const nd = &nodes[id];
+	if (nd.dlen == 0) {
+		return;
+	};
+	let loc: [512]u8 = [0...];
+	let got = 0z;
+	let todo = nd.dlen: size;
+	let blk = nd.dblock;
+	for (todo > 0) {
+		if (!block::read(blk: u64, loc[..])) {
+			break;
+		};
+		const take = if (512z < todo) 512z else todo;
+		for (let i = 0z; i < take; i += 1) {
+			nd.wbuf[got + i] = loc[i];
+		};
+		got += take;
+		todo -= take;
+		blk += 1;
+	};
+	nd.wlen = got;
+};
+
+fn dload_dir(id: size, blk: u32) void = {
+	let b: [512]u8 = [0...];
+	if (!block::read(blk: u64, b[..])) {
+		return;
+	};
+	const cnt = b[0]: size;
+	for (let i = 0z; i < cnt; i += 1) {
+		const off = 1 + i * 42;
+		const isdir = b[off] == 2;
+		const nlen = b[off + 1]: size;
+		const nm = b[off + 2..off + 2 + nlen];
+		const child = mknode(*(&nm: *str), isdir);
+		nodes[child].disk = true;
+		nodes[child].dblock = rle(b, off + 34);
+		nodes[child].dlen = rle(b, off + 38);
+		if (isdir) {
+			link(id, child);
+			dload_dir(child, nodes[child].dblock);
+		} else {
+			nodes[child].writable = true;
+			dpull(child);
+			link(id, child);
+		};
+	};
+};
+
+fn dstore(id: size) void = {
+	const nd = &nodes[id];
+	if (nd.dblock == 0 && nd.wlen > 0) {
+		nd.dblock = dnext;
+		dnext += DBLK;
+		sb_write();
+	};
+	if (nd.dblock != 0) {
+		let b: [512]u8 = [0...];
+		let pos = 0z;
+		const last = nd.dblock + DBLK;
+		for (let blk = nd.dblock; blk < last; blk += 1) {
+			for (let j = 0z; j < 512; j += 1) {
+				b[j] = 0;
+			};
+			const take = if (512z < nd.wlen - pos) 512z else nd.wlen - pos;
+			for (let j = 0z; j < take; j += 1) {
+				b[j] = nd.wbuf[pos + j];
+			};
+			block::write(blk: u64, b[..]);
+			pos += take;
+			if (pos >= nd.wlen) {
+				break;
+			};
+		};
+		nd.dlen = nd.wlen: u32;
+		dsave_dir(dfind_parent(id));
+	};
+};
+
+fn dmount() void = {
+	if (!block::present_drive()) {
+		return;
+	};
+	mntroot = mknode("mnt", true);
+	nodes[mntroot].disk = true;
+	nodes[mntroot].dblock = DROOT;
+	link(root, mntroot);
+	if (sb_read()) {
+		dload_dir(mntroot, DROOT);
+	} else {
+		sb_write();
+		dsave_dir(mntroot);
+	};
+};
+
 export fn init() void = {
 	root = mknode("/", true);
 	const dev = mknode("dev", true);
@@ -361,6 +552,7 @@ export fn init() void = {
 	nodes[files].gen = &gen_files;
 	link(proc, files);
 
+	dmount();
 	nss[0].root = root;
 	sched::reap_hook = &ns_reap;
 };
@@ -594,6 +786,9 @@ fn do_write(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	if (off + n > nd.wlen) {
 		nd.wlen = off + n;
 	};
+	if (nodes[id].disk) {
+		dstore(id);
+	};
 	bfp::w_u32(w, n: u32);
 };
 
@@ -618,6 +813,14 @@ fn do_create(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const child = mknode(*(&name: *str), isdir);
 	nodes[child].writable = !isdir;
 	link(parent, child);
+	if (nodes[parent].disk) {
+		nodes[child].disk = true;
+		if (isdir) {
+			nodes[child].dblock = dalloc();
+			dsave_dir(child);
+		};
+		dsave_dir(parent);
+	};
 	put_ident(w, child, kind_of(child));
 };
 
@@ -628,8 +831,13 @@ fn do_remove(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 		bfp::w_u32(w, 0);
 		return;
 	};
+	const parent = dfind_parent(id);
+	const wasdisk = nodes[id].disk;
 	unlink(id);
 	free_node(id);
+	if (wasdisk && parent != NOCHILD) {
+		dsave_dir(parent);
+	};
 	bfp::w_u32(w, 1);
 };
 
