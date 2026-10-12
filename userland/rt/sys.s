@@ -54,33 +54,39 @@ rt.sys_remove:
 	int $0x80
 	ret
 
+.global rt.sys_readdir
+rt.sys_readdir:
+	movq $9, %rax
+	int $0x80
+	ret
+
 .global rt.sys_halt
 rt.sys_halt:
-	movq $9, %rax
+	movq $10, %rax
 	int $0x80
 1:	jmp 1b
 
 .global rt.sys_spawn
 rt.sys_spawn:
-	movq $10, %rax
+	movq $11, %rax
 	int $0x80
 	ret
 
 .global rt.sys_spawn_shared
 rt.sys_spawn_shared:
-	movq $13, %rax
+	movq $14, %rax
 	int $0x80
 	ret
 
 .global rt.sys_alive
 rt.sys_alive:
-	movq $11, %rax
+	movq $12, %rax
 	int $0x80
 	ret
 
 .global rt.sys_fresh
 rt.sys_fresh:
-	movq $12, %rax
+	movq $13, %rax
 	int $0x80
 	ret
 

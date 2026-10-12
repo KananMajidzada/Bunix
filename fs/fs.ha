@@ -513,6 +513,13 @@ export fn init() void = {
 	nodes[hello].content = "hello from the Bunix File Protocol\n";
 	link(root, hello);
 
+	const bin = mknode("bin", true);
+	link(root, bin);
+	link(bin, mknode("hello", false));
+	link(bin, mknode("wc", false));
+	link(bin, mknode("grep", false));
+	link(bin, mknode("cp", false));
+
 	link(dev, mknode("null", false));
 
 	const cons = mknode("cons", false);
@@ -667,6 +674,17 @@ fn listdir(id: size) []u8 = {
 		n += 1;
 	};
 	return scratch[..n];
+};
+
+export fn list_path(path: str) []u8 = {
+	const s = cur();
+	const fid = walkpath(s, *(&path: *[]u8));
+	if (fid == 0) {
+		let empty: []u8 = [];
+		return empty;
+	};
+	const id = s.hnode[fid: size];
+	return listdir(id);
 };
 
 fn put_ident(w: *bfp::writer, id: size, typ: u8) void = {

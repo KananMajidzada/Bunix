@@ -1,6 +1,62 @@
 use lib;
 use rt;
 
+def MAXEXTPROG: size = 16;
+def MAXNAME: size = 32;
+
+let extprog_count: size = 0;
+let extprog_names: [MAXEXTPROG][MAXNAME]u8 = [[0...]...];
+
+fn load_bin() void = {
+	let buf: [512]u8 = [0...];
+	const n = rt::readdir("/bin", buf[..]);
+	if (n == 0) {
+		return;
+	};
+	let start = 0z;
+	for (let i = 0z; i <= n; i += 1) {
+		if (i == n || buf[i] == ('\n': u8)) {
+			const l = i - start;
+			if (l > 0 && l < MAXNAME && extprog_count < MAXEXTPROG) {
+				for (let j = 0z; j < l; j += 1) {
+					extprog_names[extprog_count][j] = buf[start + j];
+				};
+				extprog_names[extprog_count][l] = 0;
+				extprog_count += 1;
+			};
+			start = i + 1;
+		};
+	};
+};
+
+fn is_extprog(cmd: []u8) bool = {
+	for (let i = 0z; i < extprog_count; i += 1) {
+		let ok = true;
+		for (let j = 0z; j < len(cmd); j += 1) {
+			if (extprog_names[i][j] != cmd[j]) {
+				ok = false;
+				break;
+			};
+		};
+		if (ok && extprog_names[i][len(cmd)] == 0) {
+			return true;
+		};
+	};
+	return false;
+};
+
+fn help_extprog() void = {
+	for (let i = 0z; i < extprog_count; i += 1) {
+		rt::print(" ");
+		let j = 0z;
+		for (extprog_names[i][j] != 0) {
+			rt::putc(extprog_names[i][j]);
+			j += 1;
+		};
+	};
+	rt::println("");
+};
+
 export @symbol("main") fn main() void = {
 	const a = rt::arg();
 	if (len(a) == 0) {
@@ -96,6 +152,7 @@ export @symbol("main") fn main() void = {
 
 	if (rt::strcmp(a, "/sh")) {
 		rt::println("bunix user shell, type 'help'");
+		load_bin();
 		for (true) {
 			_ = rt::fresh();	// a window opened while the last command ran
 			rt::print("ush> ");
@@ -139,7 +196,8 @@ export @symbol("main") fn main() void = {
 				rt::println("bye");
 				break;
 			} else if (str_eq(cmd, "help")) {
-				rt::println("cat ls echo write mkdir touch rm hello wc grep cp user multi halt version exit");
+				rt::print("cat ls echo write mkdir touch rm user multi halt version exit");
+				help_extprog();
 			} else if (str_eq(cmd, "version")) {
 				const vp: str = "/proc/version";
 				run_cat(*(&vp: *[]u8));
@@ -167,9 +225,8 @@ export @symbol("main") fn main() void = {
 				report(rt::create(*(&rest: *str)), "created", "cannot create");
 			} else if (str_eq(cmd, "rm")) {
 				report(rt::remove(*(&rest: *str)), "removed", "cannot remove");
-			} else if (str_eq(cmd, "wc") || str_eq(cmd, "grep")
-					|| str_eq(cmd, "cp") || str_eq(cmd, "hello")) {
-				// these live in images of their own, loaded by name
+			} else if (is_extprog(cmd)) {
+				// external program with an image of its own
 				run(line);
 			} else if (str_eq(cmd, "user")) {
 				const pid = rt::spawn(*(&rest: *str));
@@ -289,4 +346,3 @@ fn run_cat(path: []u8) void = {
 		rt::println("");
 	};
 };
-

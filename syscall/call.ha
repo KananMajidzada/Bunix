@@ -15,11 +15,12 @@ export def READCHR: u64 = 5;
 export def YIELD: u64 = 6;
 export def CREATE: u64 = 7;
 export def REMOVE: u64 = 8;
-export def HALT: u64 = 9;
-export def SPAWN: u64 = 10;
-export def ALIVE: u64 = 11;
-export def FRESH: u64 = 12;
-export def SPAWN_SHARED: u64 = 13;
+export def READDIR: u64 = 9;
+export def HALT: u64 = 10;
+export def SPAWN: u64 = 11;
+export def ALIVE: u64 = 12;
+export def FRESH: u64 = 13;
+export def SPAWN_SHARED: u64 = 14;
 
 type raw = struct {
 	data: *[*]u8,
@@ -71,6 +72,20 @@ fn removepath(regs: *arch::registers) u64 = {
 	return if (fs::remove(path)) 1 else 0;
 };
 
+fn readdirpath(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	const data = fs::list_path(path);
+	let n = len(data);
+	if (n > (regs.rcx: size)) {
+		n = regs.rcx: size;
+	};
+	for (let i = 0z; i < n; i += 1) {
+		const p = ((regs.rdx: uintptr) + (i: uintptr)): *u8;
+		*p = data[i];
+	};
+	return n: u64;
+};
+
 fn spawnpath(regs: *arch::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return loader::run_fresh(path): u64;
@@ -112,6 +127,9 @@ fn handle(regs: *arch::registers) uintptr = {
 		return regs: uintptr;
 	case REMOVE =>
 		regs.rax = removepath(regs);
+		return regs: uintptr;
+	case READDIR =>
+		regs.rax = readdirpath(regs);
 		return regs: uintptr;
 	case HALT =>
 		rt::halt();

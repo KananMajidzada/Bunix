@@ -23,6 +23,7 @@ type shdr = struct {
 @symbol("rt.sys_yield") fn sys_yield() u64;
 @symbol("rt.sys_create") fn sys_create(pptr: uintptr, plen: size, isdir: u64) u64;
 @symbol("rt.sys_remove") fn sys_remove(pptr: uintptr, plen: size) u64;
+@symbol("rt.sys_readdir") fn sys_readdir(pptr: uintptr, plen: size, dptr: uintptr, dlen: size) u64;
 @symbol("rt.sys_halt") fn sys_halt() never;
 @symbol("rt.sys_spawn") fn sys_spawn(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_spawn_shared") fn sys_spawn_shared(pptr: uintptr, plen: size) u64;
@@ -121,6 +122,12 @@ export fn create(path: str) bool = {
 export fn remove(path: str) bool = {
 	const p = *(&path: *shdr);
 	return sys_remove(p.data, p.length) != 0;
+};
+
+export fn readdir(path: str, dest: []u8) size = {
+	const p = *(&path: *shdr);
+	const d = *(&dest: *shdr);
+	return sys_readdir(p.data, p.length, d.data, d.length): size;
 };
 
 export fn haltsys() never = sys_halt();
