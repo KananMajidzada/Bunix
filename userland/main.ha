@@ -97,11 +97,20 @@ export @symbol("main") fn main() void = {
 	if (rt::strcmp(a, "/sh")) {
 		rt::println("bunix user shell, type 'help'");
 		for (true) {
+			_ = rt::fresh();	// a window opened while the last command ran
 			rt::print("ush> ");
 			let lb: [128]u8 = [0...];
 			let n = 0z;
 			for (true) {
-				const c = rt::getchar();
+				if (rt::fresh()) {
+					// a new terminal took focus; give it a prompt too
+					rt::print("ush> ");
+				};
+				const c = rt::readchr();
+				if (c == 0) {
+					rt::cop();
+					continue;
+				};
 				if (c == ('\n': u8) || c == ('\r': u8)) {
 					rt::println("");
 					break;

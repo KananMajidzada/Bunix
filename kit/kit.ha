@@ -104,6 +104,18 @@ let menu_y = 0z;
 // per character or per line.
 let dirty = false;
 
+// Set when a window is created after boot, so the shell knows to greet the new
+// terminal. Cleared by take_fresh once the prompt has been drawn.
+let fresh = false;
+
+export fn take_fresh() bool = {
+	if (!fresh) {
+		return false;
+	};
+	fresh = false;
+	return true;
+};
+
 export fn active() bool = {
 	return on;
 };
@@ -431,6 +443,7 @@ fn new_window(x: size, y: size) void = {
 	zlist[nz] = wi;
 	nz += 1;
 	focus = wi;
+	fresh = true;
 };
 
 fn delete_window(wi: size) void = {
@@ -853,5 +866,6 @@ export fn begin() void = {
 	mx = fb::width() / 2;
 	my = fb::height() / 2;
 	new_window((fb::width() - ww) / 2, (fb::height() - wh) / 2);
+	fresh = false;		// the shell prints the first prompt itself
 	repaint();
 };

@@ -98,8 +98,10 @@ middle and right buttons raise a pop-up menu holding `new`, `resize`, `move`,
 `delete`, `hide`, and `exit`; the left button selects text in a window, drags
 the window by its title, or grabs a border once the pointer rests against it
 and the frame turns black. Console output goes to whatever window has focus.
-Like the text console, it lives in the kernel for now; the plan is for a window
-system to become one more file server a process can mount.
+Opening a window marks it fresh, and the shell prints a prompt into it, so a new
+terminal is ready to type in. Like the text console, it lives in the kernel for
+now; the plan is for a window system to become one more file server a process
+can mount.
 
 ## Processes and memory
 

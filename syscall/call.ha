@@ -1,6 +1,7 @@
 use arch;
 use console;
 use fs;
+use kit;
 use loader;
 use rt;
 use sched;
@@ -17,6 +18,7 @@ export def REMOVE: u64 = 8;
 export def HALT: u64 = 9;
 export def SPAWN: u64 = 10;
 export def ALIVE: u64 = 11;
+export def FRESH: u64 = 12;
 
 type raw = struct {
 	data: *[*]u8,
@@ -111,6 +113,9 @@ fn handle(regs: *arch::registers) uintptr = {
 		return regs: uintptr;
 	case ALIVE =>
 		regs.rax = if (sched::alive(regs.rdi: size)) 1 else 0;
+		return regs: uintptr;
+	case FRESH =>
+		regs.rax = if (kit::take_fresh()) 1 else 0;
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

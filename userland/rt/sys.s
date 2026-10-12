@@ -72,6 +72,12 @@ rt.sys_alive:
 	int $0x80
 	ret
 
+.global rt.sys_fresh
+rt.sys_fresh:
+	movq $12, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

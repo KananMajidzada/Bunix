@@ -26,6 +26,7 @@ type shdr = struct {
 @symbol("rt.sys_halt") fn sys_halt() never;
 @symbol("rt.sys_spawn") fn sys_spawn(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_alive") fn sys_alive(id: u64) u64;
+@symbol("rt.sys_fresh") fn sys_fresh() u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -87,6 +88,12 @@ export fn getchar() u8 = {
 		_ = sys_yield();
 	};
 };
+
+// One byte if one is waiting, else zero.
+export fn readchr() u8 = (sys_readchr() & 0xFF): u8;
+
+// True once when a new window was opened and wants its prompt.
+export fn fresh() bool = sys_fresh() != 0;
 
 export fn readfile(path: str, dest: []u8) size = {
 	const p = *(&path: *shdr);
