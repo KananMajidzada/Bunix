@@ -71,7 +71,7 @@ file namespace over the Bunix File Protocol.
 At boot the kernel starts a user-mode init, a shell running in ring 3 that owns
 the console and offers:
 
-	cat ls echo write mkdir touch rm user multi halt version exit
+	cat ls echo write mkdir touch rm wc grep cp user multi halt version exit
 
 On a VGA framebuffer the kernel also runs a small window manager. It keeps a
 shadow buffer in RAM and copies it to the device on every change, so moving or
@@ -108,6 +108,13 @@ files through the `readfile` and `writefile` system calls, which travel the BFP
 path into the in-kernel file server, read the console one byte at a time, yield
 the CPU, spawn and watch other processes, allocate memory through an `alloc`
 system call, and print through a `write` system call.
+
+A small POSIX shim in `userland/posix` sits over those calls and offers the
+open/read/write/close shape a ported program expects, plus the usual C string
+routines. The native interface hands a file over in one call, so `open` slurps
+a file into a buffer and `close` flushes it back. The `wc`, `grep`, and `cp`
+commands are written against that shim rather than the raw calls, as the first
+programs of the port environment.
 
 ![boot](doc/boot.png)
 
