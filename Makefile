@@ -7,7 +7,7 @@ include config.mk
 SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 
 # Programs that get an image of their own. The shell runs them by name.
-PROGS = hello wc grep cp
+PROGS = hello wc grep cp cc
 PROG_ELFS = $(addprefix build/elf_,$(PROGS))
 PROG_BINS = $(addprefix build/prog_,$(addsuffix .bin,$(PROGS)))
 

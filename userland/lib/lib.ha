@@ -31,3 +31,15 @@ export fn contains(hay: []u8, needle: []u8) bool = {
 	};
 	return false;
 };
+
+export fn str_eq(a: []u8, b: []u8) bool = {
+	if (len(a) != len(b)) {
+		return false;
+	};
+	for (let i = 0z; i < len(a); i += 1) {
+		if (a[i] != b[i]) {
+			return false;
+		};
+	};
+	return true;
+};

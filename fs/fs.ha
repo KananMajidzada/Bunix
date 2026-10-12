@@ -519,6 +519,7 @@ export fn init() void = {
 	link(bin, mknode("wc", false));
 	link(bin, mknode("grep", false));
 	link(bin, mknode("cp", false));
+	link(bin, mknode("cc", false));
 
 	link(dev, mknode("null", false));
 
