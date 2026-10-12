@@ -28,6 +28,20 @@ arch.inw:
 	inw %dx, %ax
 	ret
 
+.global arch.outl
+arch.outl:
+	movw %di, %dx
+	movl %esi, %eax
+	outl %eax, %dx
+	ret
+
+.global arch.inl
+arch.inl:
+	movw %di, %dx
+	xorl %eax, %eax
+	inl %dx, %eax
+	ret
+
 .global arch.insl
 arch.insl:
 	movl %edx, %ecx

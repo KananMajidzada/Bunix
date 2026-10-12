@@ -2,13 +2,17 @@
 .align 4
 multiboot_header:
 .long 0x1BADB002				/* magic */
-.long 0x00010003				/* flags: modules, memory, a.out kludge */
-.long -(0x1BADB002 + 0x00010003)		/* checksum */
+.long 0x00010007				/* flags: modules, memory, a.out kludge, video */
+.long -(0x1BADB002 + 0x00010007)		/* checksum */
 .long multiboot_header				/* header address */
 .long 0x00100000				/* load address */
 .long 0						/* load end: whole file */
 .long _kernel_end				/* bss end */
 .long _start					/* entry */
+.long 0						/* mode type: graphics */
+.long 1024					/* width */
+.long 768					/* height */
+.long 32					/* depth */
 
 .section .boot, "ax"
 .code32
@@ -128,6 +132,7 @@ boot_pdpt:
 	.skip 4096
 boot_pd:
 	.skip 4096
+.global boot_pdpt
 mb_info:
 	.skip 4
 .align 16

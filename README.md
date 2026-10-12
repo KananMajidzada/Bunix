@@ -22,9 +22,11 @@ The result is a Multiboot ELF named `bunix`.
 
 	qemu-system-x86_64 -m 256 -kernel bunix -serial stdio
 
-or `make run`. The kernel writes its boot log to both the VGA text console and
-COM1. An optional raw disk image plugged into the IDE controller gives the
-kernel some block storage:
+or `make run`. The kernel writes its boot log to a serial console, a VGA text
+console, and a graphical console. The graphical console draws a desktop with a
+window manager, driven by a PS/2 mouse; `-vga std` (the default) works. An
+optional raw disk image plugged into the IDE controller gives the kernel some
+block storage:
 
 	qemu-system-x86_64 -m 256 -kernel bunix -drive file=disk.raw,format=raw,if=ide
 
@@ -47,7 +49,9 @@ next boot.
 | `block/`    | ATA PIO driver for the primary IDE controller  |
 | `fs/`       | In-kernel file namespace served over BFP        |
 | `sys/`      | System name and version                         |
-| `console/`  | Serial, VGA text, and keyboard                  |
+| `console/`  | Serial, VGA text, keyboard, and PS/2 mouse      |
+| `fb/`       | Framebuffer, VBE mode set, and an 8x16 font     |
+| `kit/`      | Plan 9-style window manager on the framebuffer  |
 | `sched/`    | Round-robin thread scheduler                    |
 | `syscall/`  | System call dispatch                            |
 | `loader/`   | Loads user programs into their address space    |
@@ -68,6 +72,16 @@ At boot the kernel starts a user-mode init, a shell running in ring 3 that owns
 the console and offers:
 
 	cat ls echo write mkdir touch rm user multi halt version exit
+
+On a VGA framebuffer the kernel also runs a small window manager. It keeps a
+shadow buffer in RAM and copies it to the device on every change, so moving or
+resizing a window leaves nothing behind. Windows are drawn rio-style: a title
+bar and a border, a scrollbar down the right, and a pop-up menu on the middle or
+right mouse button holding `new`, `resize`, `move`, `delete`, `hide`, and
+`exit`. The left button selects text, drags a window by its title, or grabs a
+border once the pointer rests against it and the frame turns black. The
+terminal that `init` owns appears in a window, and console output goes to
+whichever window has focus.
 
 `user <path>` runs another copy of the program against a path, `user /bad`
 demonstrates the protection boundary (the process is killed for touching

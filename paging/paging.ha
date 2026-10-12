@@ -8,6 +8,30 @@ def ENTRY_PS: u64 = 0x80;
 
 let boot: uintptr = 0;
 
+// Pages above 1 GiB (where the bootloader parks the framebuffer) are shared and
+// pinned in every space through one page-directory table.
+@symbol("boot_pdpt") let boot_pdpt: [512]u64;
+
+let fbpd: uintptr = 0;
+let fb_slot: u64 = ~0u64;
+
+export fn map_fb(paddr: uintptr, bytes: u64) void = {
+	const base = (paddr: u64) & ~0x1FFFFFu64;
+	const slot = (base >> 30) & 0x1FF;
+	const first = (base >> 21) & 0x1FF;
+	const pages = (bytes + 0x1FFFFF) >> 21;
+	if (fbpd == 0) {
+		fbpd = mem::frames_alloc(1);
+		zero(fbpd, 4096);
+	};
+	for (let i = 0u64; i < pages; i += 1) {
+		set(fbpd, first + i, ((base + (i << 21)): u64) | ENTRY_P | ENTRY_W | ENTRY_PS);
+	};
+	boot_pdpt[slot: size] = (fbpd: u64) | ENTRY_P | ENTRY_W;
+	fb_slot = slot;
+	arch::write_cr3(arch::read_cr3());
+};
+
 export fn init() void = {
 	boot = arch::read_cr3();
 };
@@ -55,6 +79,9 @@ export fn space_new() uintptr = {
 		};
 	};
 	set(pdpt, 0, (pd: u64) | ENTRY_P | ENTRY_W | ENTRY_U);
+	if (fb_slot != ~0u64) {
+		set(pdpt, fb_slot, (fbpd: u64) | ENTRY_P | ENTRY_W);
+	};
 	set(pml4, 0, (pdpt: u64) | ENTRY_P | ENTRY_W | ENTRY_U);
 	return pml4;
 };

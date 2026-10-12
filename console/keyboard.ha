@@ -42,7 +42,8 @@ const shifted: [128]u8 = [
 let shift = false;
 
 export fn keyboard_has_data() bool = {
-	return (arch::inb(0x64) & 1) != 0;
+	const st = arch::inb(0x64);
+	return (st & 1) != 0 && (st & 0x20) == 0;
 };
 
 export fn keyboard_getc() u8 = {

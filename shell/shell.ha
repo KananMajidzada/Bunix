@@ -26,6 +26,7 @@ export fn monitor(id: size) never = {
 			console::println("init exited, restarting");
 			id = loader::run("/sh");
 		};
+		console::poll_mouse();
 		arch::pause();
 	};
 };

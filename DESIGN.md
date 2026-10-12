@@ -71,6 +71,33 @@ node is unfenced, so writing it can scribble on the format.
 QEMU backs the drive with a raw file, so a sector written today stays in the
 file and is still there on the next boot.
 
+## Graphics
+
+The boot header asks for a linear 1024x768x32 framebuffer. When the loader
+supplies one, `fb` maps it — it lives above 1 GiB — into every address space
+through a single shared page-directory table, and only falls back to setting a
+VBE mode itself when there is no loader framebuffer.
+
+Drawing never touches the device directly. `fb` keeps a shadow copy of the
+screen in ordinary RAM and every primitive writes there; `present` copies the
+whole shadow to the framebuffer in one pass. A frame is therefore always a
+complete, consistent picture, and moving or resizing a window cannot leave a
+trail behind, because nothing is ever drawn over stale device pixels.
+
+The mouse is a PS/2 device on the keyboard controller's aux port. The console's
+wait loops poll it, decode three-byte packets, and hand the deltas and button
+mask to the window manager; the keyboard status byte's aux bit keeps mouse
+bytes out of the key stream.
+
+`kit` is a small rio-style window manager over the frame buffer: a stack of
+overlapping terminals, each with a title bar, a border, and a scrollbar. The
+middle and right buttons raise a pop-up menu holding `new`, `resize`, `move`,
+`delete`, `hide`, and `exit`; the left button selects text in a window, drags
+the window by its title, or grabs a border once the pointer rests against it
+and the frame turns black. Console output goes to whatever window has focus.
+Like the text console, it lives in the kernel for now; the plan is for a window
+system to become one more file server a process can mount.
+
 ## Processes and memory
 
 Kernel threads are scheduled round-robin by the timer. Each thread carries a
@@ -123,6 +150,11 @@ write, and remove, a per-process namespace that binds in the shared /dev and
 a process's memory, page tables, and files when it leaves, and an ATA PIO
 driver that turns an IDE drive into a persistent raw `/dev/disk`, and a
 disk filesystem mounted at `/mnt` that keeps the file tree across reboots.
+
+Done also: a graphical console. A framebuffer, a PS/2 mouse, and a rio-style
+window manager with overlapping terminals, a pop-up menu, border resize, title
+drag, and hide and delete, all drawn through a RAM shadow buffer that is copied
+to the device whole.
 
 Next: the port environment.
 

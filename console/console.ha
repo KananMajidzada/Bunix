@@ -1,8 +1,13 @@
+use arch;
+use kit;
 use rt;
+
+let lastbtn: u8 = 0;
 
 export fn putc(ch: u8) void = {
 	serial_putc(ch);
 	vga_putc(ch);
+	kit::putc(ch);
 };
 
 export fn write(buf: []u8) size = {
@@ -49,6 +54,7 @@ export fn printnum(n: u64) void = {
 
 export fn getch() u8 = {
 	for (true) {
+		poll_mouse();
 		if (serial_has_data()) {
 			return serial_getc();
 		};
@@ -58,11 +64,25 @@ export fn getch() u8 = {
 				return ch;
 			};
 		};
+		arch::pause();
+	};
+};
+
+// Moves the pointer along with whatever the waiting loop is doing.
+export fn poll_mouse() void = {
+	mouse_poll();
+	const dx = mouse_dx();
+	const dy = mouse_dy();
+	const b = mouse_buttons();
+	if (dx != 0 || dy != 0 || b != lastbtn) {
+		kit::mouse(dx, dy, b);
+		lastbtn = b;
 	};
 };
 
 // Returns one byte, or zero when nothing is waiting.
 export fn pollch() u8 = {
+	poll_mouse();
 	if (serial_has_data()) {
 		return serial_getc();
 	};
@@ -75,5 +95,6 @@ export fn pollch() u8 = {
 @init fn init() void = {
 	serial_init();
 	vga_init();
+	mouse_init();
 	rt::con_write = &write;
 };

@@ -2,7 +2,9 @@ use arch;
 use block;
 use boot;
 use console;
+use fb;
 use fs;
+use kit;
 use loader;
 use mem;
 use paging;
@@ -28,18 +30,39 @@ fn on_fault(regs: *arch::registers) uintptr = {
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {
-	sys::banner();
-	console::print(sys::NAME);
-	console::print(" ");
-	console::println(sys::VERSION);
-	console::println("");
-
 	if (mbi == 0) {
 		console::println("bunix: no multiboot information");
 		rt::halt();
 	};
 
 	const mb = boot::at(mbi);
+	let mem_mib = 0u64;
+	if ((mb.flags & boot::FLAG_MMAP) != 0) {
+		mem_mib = boot::available(mb) / (1024 * 1024);
+	};
+
+	mem::init(mb);
+	loader::reserve();
+	paging::init();
+	fb::init(mb);
+	if (!fb::active()) {
+		fb::vbe();
+	};
+	kit::begin();
+
+	if (fb::active()) {
+		console::print("video:     ");
+		console::printnum(fb::width());
+		console::print("x");
+		console::printnum(fb::height());
+		console::println("");
+	};
+
+	console::print(sys::NAME);
+	console::print(" ");
+	console::println(sys::VERSION);
+	console::println("");
+
 	if ((mb.flags & boot::FLAG_MEMORY) != 0) {
 		console::print("memory:    ");
 		console::printnum(mb.mem_lower);
@@ -48,17 +71,12 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		console::println(" KiB high");
 	};
 
-	let mem_mib = 0u64;
 	if ((mb.flags & boot::FLAG_MMAP) != 0) {
-		mem_mib = boot::available(mb) / (1024 * 1024);
 		console::print("available: ");
 		console::printnum(mem_mib);
 		console::println(" MiB");
 	};
 
-	mem::init(mb);
-	loader::reserve();
-	paging::init();
 	fs::init();
 	console::print("frames:    ");
 	console::printnum(mem::free_frames());
