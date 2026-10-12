@@ -29,8 +29,9 @@ kernel some block storage:
 	qemu-system-x86_64 -m 256 -kernel bunix -drive file=disk.raw,format=raw,if=ide
 
 The boot log then reports the disk, and `/dev/disk` reads and writes whole
-sectors of it. Writes survive a reboot, so something parked on the disk is
-still there next boot.
+sectors of it. A disk filesystem is mounted at `/mnt`: files and directories
+created there are written straight through to the drive and are still there
+next boot.
 
 ## Layout
 
@@ -96,5 +97,6 @@ system call, and print through a `write` system call.
 
 ![boot](doc/boot.png)
 
-The in-memory file tree is not yet laid out on the disk; `/dev/disk` is raw
-block access. See `DESIGN.md` for where persistence is going.
+With an IDE drive attached, the file tree under `/mnt` lives on it and
+outlives the machine; everything else in the kernel tree is memory-only. See
+`DESIGN.md` for the on-disk layout.

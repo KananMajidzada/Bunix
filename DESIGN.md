@@ -55,11 +55,21 @@ MiB, and moves once there is a reason to.
 
 An ATA PIO driver in `block/` talks to the primary IDE controller on the
 conventional ports, one sector at a time, polling for busy and data-ready
-instead of using interrupts. The kernel exposes the whole thing to the
-namespace as `/dev/disk`: a read or write from any byte offset is translated
-into whole sectors, with read-modify-write for partial ones. QEMU backs the
-drive with a raw file, so a sector written today stays in the file and is
-still there on the next boot.
+instead of using interrupts. The whole drive is reachable raw as `/dev/disk`:
+any byte offset is translated into whole sectors, with read-modify-write for
+partial ones.
+
+A second, higher layer keeps the file tree on the drive. The tree that lives
+under `/mnt` is disk-backed: a superblock in sector 0 (magic, root directory,
+next free block), directory blocks that hold up to eight 42-byte entries of
+type, name, data block, and length, and contiguous data blocks for file
+contents. Every create, write, and remove writes straight through to the
+sectors, so the same file is there on the next boot. Dirs and files created
+anywhere else in the initial tree are still memory-only. The raw `/dev/disk`
+node is unfenced, so writing it can scribble on the format.
+
+QEMU backs the drive with a raw file, so a sector written today stays in the
+file and is still there on the next boot.
 
 ## Processes and memory
 
@@ -111,9 +121,10 @@ in-memory file tree served over the Bunix File Protocol with create, read,
 write, and remove, a per-process namespace that binds in the shared /dev and
 /proc while giving every process private space of its own, full reclamation of
 a process's memory, page tables, and files when it leaves, and an ATA PIO
-driver that turns an IDE drive into a persistent raw `/dev/disk`.
+driver that turns an IDE drive into a persistent raw `/dev/disk`, and a
+disk filesystem mounted at `/mnt` that keeps the file tree across reboots.
 
-Next: the port environment, and laying the file tree out on the disk.
+Next: the port environment.
 
 ## Roadmap
 
@@ -123,4 +134,4 @@ Next: the port environment, and laying the file tree out on the disk.
 4. A file-server core and a per-process namespace. [done]
 5. `/dev`, `/proc`, and an init process. [done]
 6. The port environment: a POSIX library, a shell, and a C compiler driver.
-7. A filesystem with persistence. [storage driver done, file layout next]
+7. A filesystem with persistence. [done]
