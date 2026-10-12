@@ -87,7 +87,10 @@ trail behind, because nothing is ever drawn over stale device pixels.
 The mouse is a PS/2 device on the keyboard controller's aux port. The console's
 wait loops poll it, decode three-byte packets, and hand the deltas and button
 mask to the window manager; the keyboard status byte's aux bit keeps mouse
-bytes out of the key stream.
+bytes out of the key stream. More than one thread can be waiting for input at
+once, so packet assembly runs with interrupts held, and a guard serialises the
+redraw that follows. The yield path polls as well, so the pointer keeps moving
+while a spawned program runs.
 
 `kit` is a small rio-style window manager over the frame buffer: a stack of
 overlapping terminals, each with a title bar, a border, and a scrollbar. The
