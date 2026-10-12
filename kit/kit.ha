@@ -7,8 +7,9 @@ use rt;
 // on the right edge. Button 1 selects, moves, and resizes; buttons 2 and 3
 // raise a menu. Window changes repaint the whole desktop into the framebuffer
 // shadow, so moving or resizing never leaves a trail behind. Terminal output
-// is instead batched: writes mark the screen dirty and the frame is drawn once
-// the next idle tick, so a line of text costs one repaint, not one per letter.
+// is instead batched: writes mark the screen dirty and one frame is drawn when
+// the loop next waits for input, so a command's output costs one repaint
+// rather than one per letter or line.
 
 def MAXWIN: size = 6;
 def MAXCOLS: size = 120;
@@ -98,9 +99,9 @@ let menu_x = 0z;
 let menu_y = 0z;
 
 // Set when the text buffers changed but the screen has not caught up yet.
-// Terminal writes only mark this; the frame is drawn once the next idle tick
-// or line break comes around, so a burst of output costs one repaint, not one
-// per character.
+// Terminal writes only mark this; the frame is drawn once the waiting loop
+// next polls for input, so a burst of output costs one repaint instead of one
+// per character or per line.
 let dirty = false;
 
 export fn active() bool = {
