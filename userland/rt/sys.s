@@ -66,6 +66,12 @@ rt.sys_spawn:
 	int $0x80
 	ret
 
+.global rt.sys_spawn_shared
+rt.sys_spawn_shared:
+	movq $13, %rax
+	int $0x80
+	ret
+
 .global rt.sys_alive
 rt.sys_alive:
 	movq $11, %rax

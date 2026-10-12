@@ -19,6 +19,7 @@ export def HALT: u64 = 9;
 export def SPAWN: u64 = 10;
 export def ALIVE: u64 = 11;
 export def FRESH: u64 = 12;
+export def SPAWN_SHARED: u64 = 13;
 
 type raw = struct {
 	data: *[*]u8,
@@ -75,6 +76,12 @@ fn spawnpath(regs: *arch::registers) u64 = {
 	return loader::run_fresh(path): u64;
 };
 
+// Starts a program in the caller's namespace, so it sees the same files.
+fn spawnpath_shared(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	return loader::run(path): u64;
+};
+
 fn handle(regs: *arch::registers) uintptr = {
 	switch (regs.rax) {
 	case EXIT =>
@@ -110,6 +117,9 @@ fn handle(regs: *arch::registers) uintptr = {
 		rt::halt();
 	case SPAWN =>
 		regs.rax = spawnpath(regs);
+		return regs: uintptr;
+	case SPAWN_SHARED =>
+		regs.rax = spawnpath_shared(regs);
 		return regs: uintptr;
 	case ALIVE =>
 		regs.rax = if (sched::alive(regs.rdi: size)) 1 else 0;

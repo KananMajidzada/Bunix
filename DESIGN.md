@@ -9,7 +9,7 @@ translates POSIX calls onto the native interface.
 
 The layering, from bottom to top:
 
-	port/        POSIX library and shell, linked into the user program
+	userland/    POSIX library, shell, and programs, built into user images
 	file servers userspace servers: /dev, /net, /proc, ...
 	namespace    per-process mount and bind tables
 	kernel       boot, memory, scheduler, IPC, drivers
@@ -146,10 +146,17 @@ slices of it; opening for write collects bytes and flushes them on close.
 Descriptors 0, 1, and 2 are the console, and a read from 0 waits on the
 keyboard.
 
-Programs written against the shim run as command bodies in the user program;
-`wc`, `grep`, and `cp` are the first. There is no separate binary loader yet,
-so everything links into the one image the kernel knows how to start. A loader
-and a C compiler driver are still to come.
+Programs written against the shim used to run as command bodies in the one user
+image; now each has an image of its own. `userland/prog/<name>` is built and
+linked at the same base as the shell, and the images are folded into the kernel
+as raw bytes beside a table naming each one. When a process asks for a program,
+the loader picks an image by the first word of the command line — a path is
+stripped to its last element — and starts it in the caller's namespace, so it
+opens the same files the caller would. If no image matches, the shell image
+runs instead, so the built-ins and the single-image commands are unaffected.
+
+A `/bin` that programs are discovered through, and a C compiler driver that
+compiles against the shim, are still to come.
 
 ## Conventions
 
@@ -181,10 +188,11 @@ drag, and hide and delete, all drawn through a RAM shadow buffer that is copied
 to the device whole.
 
 Started: the port environment. A POSIX shim in userspace gives the user program
-`open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls,
-and `wc`, `grep`, and `cp` are written against it.
+`open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
+`wc`, `grep`, and `cp` are written against it, and each is a loadable image of
+its own.
 
-Next: the port environment.
+Next: a C compiler driver for the port environment.
 
 ## Roadmap
 
@@ -194,5 +202,5 @@ Next: the port environment.
 4. A file-server core and a per-process namespace. [done]
 5. `/dev`, `/proc`, and an init process. [done]
 6. The port environment: a POSIX library, a shell, and a C compiler driver.
-   [shim and first programs done; loader and compiler driver next]
+   [shim, loader, and first programs done; compiler driver next]
 7. A filesystem with persistence. [done]

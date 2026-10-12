@@ -25,6 +25,7 @@ type shdr = struct {
 @symbol("rt.sys_remove") fn sys_remove(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_halt") fn sys_halt() never;
 @symbol("rt.sys_spawn") fn sys_spawn(pptr: uintptr, plen: size) u64;
+@symbol("rt.sys_spawn_shared") fn sys_spawn_shared(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_alive") fn sys_alive(id: u64) u64;
 @symbol("rt.sys_fresh") fn sys_fresh() u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
@@ -127,6 +128,12 @@ export fn haltsys() never = sys_halt();
 export fn spawn(path: str) u64 = {
 	const p = *(&path: *shdr);
 	return sys_spawn(p.data, p.length);
+};
+
+// Starts a program that shares this process's namespace.
+export fn spawn_shared(path: str) u64 = {
+	const p = *(&path: *shdr);
+	return sys_spawn_shared(p.data, p.length);
 };
 
 export fn alive(id: u64) bool = {
