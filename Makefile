@@ -7,8 +7,8 @@ include config.mk
 SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 
 # Programs that get an image of their own. The shell runs them by name.
-PROGS = hello wc grep cp cc
-PROG_ELFS = $(addprefix build/elf_,$(PROGS))
+PROGS = hello wc grep cp cc test_c
+PROG_ELFS = $(addprefix build/elf_,$(filter-out test_c,$(PROGS)))
 PROG_BINS = $(addprefix build/prog_,$(addsuffix .bin,$(PROGS)))
 
 all: bunix.bin
@@ -51,6 +51,18 @@ build/elf_%: $(USER_SRCS)
 build/prog_%.bin: build/elf_%
 	$(OBJCOPY) -O binary $< $@
 
+# test_c is cross-compiled with bcc; copy its binary and create a minimal ELF for nm
+build/prog_test_c.bin: build/test_c.bin
+	cp $< $@
+
+build/elf_test_c: build/test_c.bin
+	@mkdir -p build
+	@# Create a minimal ELF with __image_end symbol for the progs.ha generator
+	@# The binary is linked at 0x400000; __image_end = 0x400000 + size
+	@size=$$(wc -c < build/test_c.bin); \
+	end=$$(printf "0x%x" $$((0x400000 + $$size))); \
+	echo "SECTIONS { . = 0x400000; __image_end = $$end; }" | $(LD) -T /dev/stdin -o $@ /dev/null
+
 # Fold the program images into the kernel: their bytes end to end in one blob,
 # with a table naming each one's offset and size.
 build/progs.bin: $(PROG_BINS)
@@ -59,15 +71,17 @@ build/progs.bin: $(PROG_BINS)
 user/progs.s: build/progs.bin
 	@{ printf '.section .rodata\n.global user.blobs\nuser.blobs:\n.incbin "build/progs.bin"\n'; } > $@
 
-user/progs.ha: build/progs.bin $(PROG_ELFS)
-	@{ printf 'export type program = struct {\n\tnam: str,\n\toff: size,\n\tbytes: size,\n\tend: u64,\n};\n\n'; \
+user/progs.ha: build/progs.bin $(PROG_ELFS) build/elf_test_c
+	@{ printf 'export type program = struct {\n\tnam: str,\n\toff: size,\n\tbytes: size,\n\tend: u64,\n\tentry: u64,\n};\n\n'; \
 	   printf 'export @symbol("user.blobs") const blobs: u8;\n\n'; \
 	   printf 'export const programs: [%s]program = [\n' "$$(echo $(PROGS) | wc -w)"; \
 	   off=0; \
 	   for p in $(PROGS); do \
 	     n=$$(wc -c < build/prog_$$p.bin); \
-	     x=$$(nm build/elf_$$p | awk '$$3 == "__image_end" { print $$1 }'); \
-	     printf '\tprogram { nam = "%s", off = %s, bytes = %s, end = 0x%s },\n' "$$p" "$$off" "$$n" "$$x"; \
+	     x=$$(nm build/elf_$$p 2>/dev/null | awk '$$3 == "__image_end" { print $$1 }'); \
+	     e=$$(nm build/elf_$$p 2>/dev/null | awk '$$3 == "_start" { print $$1 }'); \
+	     if [ -z "$$e" ]; then e="400000"; fi; \
+	     printf '\tprogram { nam = "%s", off = %s, bytes = %s, end = 0x%s, entry = 0x%s },\n' "$$p" "$$off" "$$n" "$$x" "$$e"; \
 	     off=$$((off + n)); \
 	   done; \
 	   printf '];\n'; } > $@

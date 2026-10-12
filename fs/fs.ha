@@ -520,6 +520,7 @@ export fn init() void = {
 	link(bin, mknode("grep", false));
 	link(bin, mknode("cp", false));
 	link(bin, mknode("cc", false));
+	link(bin, mknode("test_c", false));
 
 	link(dev, mknode("null", false));
 

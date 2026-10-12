@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""
+bcc - Bunix C cross-compiler driver
+Runs on host, produces flat binaries linked at 0x400000 for Bunix.
+"""
+
+import os
+import sys
+import subprocess
+import argparse
+
+DEFAULT_CC = "cc"
+DEFAULT_CFLAGS = "-ffreestanding -nostdlib -fno-pic -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -O2"
+DEFAULT_LDFLAGS = "-nostdlib -static -T"
+
+def find_runtime_dir():
+    """Find the Bunix userland runtime directory."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "..", "..", "userland")
+
+def run_cmd(cmd, verbose=False):
+    if verbose:
+        print(f"bcc: {cmd}", file=sys.stderr)
+    result = subprocess.run(cmd, shell=True)
+    return result.returncode
+
+def main():
+    parser = argparse.ArgumentParser(description="Bunix C cross-compiler")
+    parser.add_argument("-o", "--output", help="Output file")
+    parser.add_argument("-c", action="store_true", help="Compile only (produce .o)")
+    parser.add_argument("-S", action="store_true", help="Emit assembly (produce .s)")
+    parser.add_argument("-v", "-vv", action="store_true", help="Verbose")
+    parser.add_argument("-k", action="store_true", help="Keep object files")
+    parser.add_argument("inputs", nargs="+", help="Input C files")
+    args = parser.parse_args()
+
+    runtime_dir = find_runtime_dir()
+    c_link_script = os.path.join(runtime_dir, "rt", "c.ld")
+    include_dir = os.path.join(runtime_dir, "rt")
+
+    if not os.path.exists(c_link_script):
+        print(f"bcc: C linker script not found at {c_link_script}", file=sys.stderr)
+        sys.exit(1)
+
+    cc = DEFAULT_CC
+    cflags = f"{DEFAULT_CFLAGS} -I{include_dir}"
+    output = args.output
+    compile_only = args.c
+    emit_asm = args.S
+    verbose = args.v
+    keep_objects = args.k
+    input_files = args.inputs
+
+    if not output:
+        if compile_only or emit_asm:
+            base = os.path.splitext(os.path.basename(input_files[0]))[0]
+            output = base + (".s" if emit_asm else ".o")
+        else:
+            output = "a.out"
+
+    obj_files = []
+    for input_file in input_files:
+        base = os.path.splitext(os.path.basename(input_file))[0]
+        obj = base + ".o"
+        obj_files.append(obj)
+
+        cmd = f"{cc} {cflags} -c {input_file} -o {obj}"
+        if run_cmd(cmd, verbose) != 0:
+            print(f"bcc: compilation failed for {input_file}", file=sys.stderr)
+            sys.exit(1)
+
+    if not compile_only and not emit_asm:
+        libc_path = os.path.join(runtime_dir, "rt", "libc.a")
+        objs_str = " ".join(obj_files)
+        cmd = f"{cc} {DEFAULT_LDFLAGS} {c_link_script} -o {output} {objs_str} {libc_path}"
+        if run_cmd(cmd, verbose) != 0:
+            print("bcc: linking failed", file=sys.stderr)
+            sys.exit(1)
+
+        cmd2 = f"objcopy -O binary {output} {output}.bin"
+        if run_cmd(cmd2, verbose) != 0:
+            print("bcc: objcopy failed", file=sys.stderr)
+            sys.exit(1)
+        print(f"bcc: created {output}.bin (flat binary for Bunix)")
+
+    if not keep_objects:
+        for obj in obj_files:
+            if obj != output:
+                try:
+                    os.remove(obj)
+                except OSError:
+                    pass
+
+if __name__ == "__main__":
+    main()

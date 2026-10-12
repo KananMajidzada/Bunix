@@ -89,6 +89,7 @@ fn run_with(arg: str, fresh: bool) size = {
 	// sees the whole line, a named program only its arguments.
 	let blob = slice_of(&user::prog[0]: uintptr, len(user::prog));
 	let image_end = user::image_end;
+	let entry = user::entry;
 	let payload = b;
 	const pi = pick(b);
 	if (pi >= 0) {
@@ -96,6 +97,7 @@ fn run_with(arg: str, fresh: bool) size = {
 		const pool = (&user::blobs): uintptr;
 		blob = slice_of(pool + p.off, p.bytes);
 		image_end = p.end;
+		entry = p.entry;
 		payload = rest_of(b);
 	};
 	if (len(payload) > MAXARG) {
@@ -139,9 +141,11 @@ fn run_with(arg: str, fresh: bool) size = {
 	for (let i = 0z; i < len(payload); i += 1) {
 		*((aframe + (i: uintptr)): *u8) = payload[i];
 	};
+	// Store argument length at ARG_LEN (ARG + 8) for C runtime
+	*((aframe + 8: uintptr): *u64) = len(payload): u64;
 
 	const id = sched::spawn_user(
-		user::entry: uintptr,
+		entry: uintptr,
 		STACK_TOP: uintptr,
 		ARG: uintptr,
 		len(payload),
