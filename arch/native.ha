@@ -13,6 +13,8 @@ export fn sti() void;
 export fn io_wait() void;
 export fn probe(addr: uintptr) u8;
 export fn pause() void;
+export fn irq_save() u64;
+export fn irq_restore(flags: u64) void;
 export fn memcpy(dst: uintptr, src: uintptr, n: size) void;
 export fn store64(dst: uintptr, word: u64, count: size) void;
 export fn ltr(sel: u16) void;

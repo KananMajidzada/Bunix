@@ -3,6 +3,7 @@ use kit;
 use rt;
 
 let lastbtn: u8 = 0;
+let in_poll = false;
 
 export fn putc(ch: u8) void = {
 	serial_putc(ch);
@@ -68,8 +69,17 @@ export fn getch() u8 = {
 	};
 };
 
-// Moves the pointer along with whatever the waiting loop is doing.
+// Moves the pointer along with whatever the waiting loop is doing. More than
+// one thread can be waiting for input, so a guard keeps a preempted draw from
+// being interleaved by another one.
 export fn poll_mouse() void = {
+	const irq = arch::irq_save();
+	if (in_poll) {
+		arch::irq_restore(irq);
+		return;
+	};
+	in_poll = true;
+	arch::irq_restore(irq);
 	mouse_poll();
 	const dx = mouse_dx();
 	const dy = mouse_dy();
@@ -79,6 +89,7 @@ export fn poll_mouse() void = {
 		lastbtn = b;
 	};
 	kit::sync();
+	in_poll = false;
 };
 
 // Returns one byte, or zero when nothing is waiting.

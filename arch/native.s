@@ -90,6 +90,20 @@ arch.pause:
 	pause
 	ret
 
+/* Return RFLAGS and disable interrupts; pair with irq_restore. */
+.global arch.irq_save
+arch.irq_save:
+	pushfq
+	popq %rax
+	cli
+	ret
+
+.global arch.irq_restore
+arch.irq_restore:
+	pushq %rdi
+	popfq
+	ret
+
 /* Block copy through rep movsq, finishing the tail with bytes. */
 .global arch.memcpy
 arch.memcpy:

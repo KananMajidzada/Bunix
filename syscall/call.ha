@@ -95,6 +95,7 @@ fn handle(regs: *arch::registers) uintptr = {
 		regs.rax = console::pollch(): u64;
 		return regs: uintptr;
 	case YIELD =>
+		console::poll_mouse();
 		regs.rax = 0;
 		return sched::tick(regs);
 	case CREATE =>

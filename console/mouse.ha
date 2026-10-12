@@ -70,7 +70,12 @@ fn mouse_pending() bool = {
 	return (st & 1) != 0 && (st & 0x20) != 0;
 };
 
+// Packet assembly runs in whichever thread is waiting for input, and there can
+// be more than one. A timer tick between two bytes of a packet would let the
+// other thread read the rest and resynchronise on a data byte, so the whole
+// parse holds interrupts off.
 export fn mouse_poll() void = {
+	const irq = arch::irq_save();
 	for (mouse_pending()) {
 		const b = arch::inb(0x60);
 		if (mouse_got == 0 && (b & 0x08) == 0) {
@@ -94,17 +99,22 @@ export fn mouse_poll() void = {
 			mouse_btns = flags & 0x07;
 		};
 	};
+	arch::irq_restore(irq);
 };
 
 export fn mouse_dx() int = {
+	const irq = arch::irq_save();
 	const v = mouse_accx;
 	mouse_accx = 0;
+	arch::irq_restore(irq);
 	return v;
 };
 
 export fn mouse_dy() int = {
+	const irq = arch::irq_save();
 	const v = mouse_accy;
 	mouse_accy = 0;
+	arch::irq_restore(irq);
 	return v;
 };
 
