@@ -14,6 +14,7 @@ export fn write(buf: []u8) size = {
 	for (let i = 0z; i < len(buf); i += 1) {
 		putc(buf[i]);
 	};
+	kit::sync();
 	return len(buf);
 };
 
@@ -21,6 +22,7 @@ export fn write_raw(addr: uintptr, n: size) void = {
 	for (let i = 0z; i < n; i += 1) {
 		putc(*((addr + (i: uintptr)): *u8));
 	};
+	kit::sync();
 };
 
 export fn print(s: str) void = {
@@ -78,6 +80,7 @@ export fn poll_mouse() void = {
 		kit::mouse(dx, dy, b);
 		lastbtn = b;
 	};
+	kit::sync();
 };
 
 // Returns one byte, or zero when nothing is waiting.

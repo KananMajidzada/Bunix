@@ -90,6 +90,27 @@ arch.pause:
 	pause
 	ret
 
+/* Block copy through rep movsq, finishing the tail with bytes. */
+.global arch.memcpy
+arch.memcpy:
+	movq %rdx, %rcx
+	shrq $3, %rcx
+	cld
+	rep movsq
+	movq %rdx, %rcx
+	andq $7, %rcx
+	rep movsb
+	ret
+
+/* Fill through rep stosq with a repeating 8-byte word. */
+.global arch.store64
+arch.store64:
+	movq %rsi, %rax
+	movq %rdx, %rcx
+	cld
+	rep stosq
+	ret
+
 .global arch.ltr
 arch.ltr:
 	movw %di, %ax

@@ -1,3 +1,4 @@
+use arch;
 use boot;
 use mem;
 use paging;
@@ -94,9 +95,7 @@ export fn fill(x: size, y: size, w: size, h: size, c: u32) void = {
 		const words = (w - i) / 2z;
 		if (words > 0) {
 			const b = addr + ((y + j) * pitch + (x + i) * 4): uintptr;
-			for (let k = 0z; k < words; k += 1) {
-				*((b + k * 8): *u64) = pair;
-			};
+			arch::store64(b, pair, words);
 		};
 		if ((w - i) % 2z == 1) {
 			px(x + w - 1, y + j, c);
@@ -109,14 +108,7 @@ export fn present() void = {
 	if (shadow == 0) {
 		return;
 	};
-	const n = pitch * fbh;
-	const words = n / 8z;
-	for (let i = 0z; i < words; i += 1) {
-		*((real + i * 8): *u64) = *((shadow + i * 8): *const u64);
-	};
-	for (let i = words * 8z; i < n; i += 1) {
-		*((real + i): *u8) = *((shadow + i): *const u8);
-	};
+	arch::memcpy(real, shadow, pitch * fbh);
 };
 
 export fn present_rect(x: size, y: size, w: size, h: size) void = {
@@ -131,20 +123,7 @@ export fn present_rect(x: size, y: size, w: size, h: size) void = {
 	};
 	for (let j = 0z; j < h; j += 1) {
 		const off = (y + j) * pitch + x * 4;
-		let i = 0z;
-		if ((x & 1z) != 0) {
-			*((real + off): *u32) = *((shadow + off): *const u32);
-			i = 1;
-		};
-		const words = (w - i) / 2z;
-		for (let k = 0z; k < words; k += 1) {
-			const o = off + (i + k * 2z) * 4;
-			*((real + o): *u64) = *((shadow + o): *const u64);
-		};
-		if ((w - i) % 2z == 1) {
-			const o = off + (w - 1) * 4;
-			*((real + o): *u32) = *((shadow + o): *const u32);
-		};
+		arch::memcpy(real + off, shadow + off, w * 4);
 	};
 };
 

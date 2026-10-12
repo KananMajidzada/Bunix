@@ -5,8 +5,10 @@ use rt;
 // terminals drawn as flat rectangles: a title bar to drag, a frame that turns
 // black under the pointer so an edge can be grabbed to resize, and a scrollbar
 // on the right edge. Button 1 selects, moves, and resizes; buttons 2 and 3
-// raise a menu. Every change repaints the whole desktop into the framebuffer
-// shadow, so moving or resizing never leaves a trail behind.
+// raise a menu. Window changes repaint the whole desktop into the framebuffer
+// shadow, so moving or resizing never leaves a trail behind. Terminal output
+// is instead batched: writes mark the screen dirty and the frame is drawn once
+// the next idle tick, so a line of text costs one repaint, not one per letter.
 
 def MAXWIN: size = 6;
 def MAXCOLS: size = 120;
@@ -94,6 +96,12 @@ let menu_sel = -1;
 let menu_win: size = NONE;
 let menu_x = 0z;
 let menu_y = 0z;
+
+// Set when the text buffers changed but the screen has not caught up yet.
+// Terminal writes only mark this; the frame is drawn once the next idle tick
+// or line break comes around, so a burst of output costs one repaint, not one
+// per character.
+let dirty = false;
 
 export fn active() bool = {
 	return on;
@@ -284,6 +292,7 @@ fn draw_pointer() void = {
 
 // Repaints the desktop into the shadow and presents one whole frame.
 fn repaint() void = {
+	dirty = false;
 	hover = hovered();
 	fb::fill(0, 0, fb::width(), fb::height(), DESKTOP);
 	for (let i = 0z; i < nz; i += 1) {
@@ -814,7 +823,14 @@ export fn putc(ch: u8) void = {
 		};
 	};
 	follow(wi);
-	repaint();
+	dirty = true;
+};
+
+// Draws any terminal output written since the last frame.
+export fn sync() void = {
+	if (dirty) {
+		repaint();
+	};
 };
 
 export fn begin() void = {
