@@ -3,6 +3,7 @@ use bfp;
 use block;
 use console;
 use mem;
+use paging;
 use sched;
 use sys;
 use user;
@@ -27,7 +28,12 @@ export type node = struct {
 	wdev: nullable *fn(buf: []u8) size,
 	wdsk: nullable *fn(data: []u8, off: u64) size,
 	wlen: size,
-	wbuf: [BUFSZ]u8,
+	// A written file's bytes, allocated when it is first written and grown
+	// as it fills. A fixed buffer in every node would cap every file at the
+	// same small size, and a linker writing an executable needs more room
+	// than that.
+	wbuf: uintptr,
+	wcap: size,
 	disk: bool,
 	dblock: u32,
 	dlen: u32,
@@ -96,7 +102,7 @@ let nused: size = 0;
 let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
 	content = "", gen = null, gdsk = null, writable = false, wdev = null,
-	wdsk = null, wlen = 0, wbuf = [0...], disk = false, dblock = 0, dlen = 0,
+	wdsk = null, wlen = 0, wbuf = 0, wcap = 0, disk = false, dblock = 0, dlen = 0,
 }...];
 let nnodes: size = 0;
 let root: size = 0;
@@ -146,7 +152,8 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.wdev = null;
 	nd.wdsk = null;
 	nd.wlen = 0;
-	nd.wbuf = [0...];
+	nd.wbuf = 0;
+	nd.wcap = 0;
 	nd.disk = false;
 	nd.dblock = 0;
 	nd.dlen = 0;
@@ -154,7 +161,50 @@ fn mknode(name: str, isdir: bool) size = {
 	return id;
 };
 
+fn wcopy(dst: uintptr, src: uintptr, n: size) void = {
+	for (let i = 0z; i < n; i += 1) {
+		*((dst + i): *u8) = *((src + i): *u8);
+	};
+};
+
+fn wzero(p: uintptr, n: size) void = {
+	for (let i = 0z; i < n; i += 1) {
+		*((p + i): *u8) = 0;
+	};
+};
+
+// Makes room for a written file to reach `need` bytes. Pages are the only
+// thing the memory manager hands out, so the size rounds up to one.
+fn wreserve(nd: *node, need: size) bool = {
+	if (need <= nd.wcap) {
+		return true;
+	};
+	let want = nd.wcap;
+	if (want < 4096) {
+		want = 4096;
+	};
+	want = ((need + 4096 - 1) / 4096) * 4096;
+	const p = mem::frames_alloc(want / 4096);
+	if (p == 0) {
+		return false;
+	};
+	if (nd.wbuf != 0) {
+		wcopy(p, nd.wbuf, nd.wlen);
+		wzero(p + nd.wcap, want - nd.wcap);
+		mem::release(nd.wbuf);
+	};
+	nd.wbuf = p;
+	nd.wcap = want;
+	return true;
+};
+
 fn free_node(id: size) void = {
+	const nd = &nodes[id];
+	if (nd.wbuf != 0) {
+		mem::release(nd.wbuf);
+		nd.wbuf = 0;
+		nd.wcap = 0;
+	};
 	nextfree[id] = freehead;
 	freehead = id;
 	nused -= 1;
@@ -459,8 +509,11 @@ fn dpull(id: size) void = {
 			break;
 		};
 		const take = if (512z < todo) 512z else todo;
+		if (!wreserve(nd, got + take)) {
+			break;
+		};
 		for (let i = 0z; i < take; i += 1) {
-			nd.wbuf[got + i] = loc[i];
+			*((nd.wbuf + (got + i)): *u8) = loc[i];
 		};
 		got += take;
 		todo -= take;
@@ -512,7 +565,7 @@ fn dstore(id: size) void = {
 			};
 			const take = if (512z < nd.wlen - pos) 512z else nd.wlen - pos;
 			for (let j = 0z; j < take; j += 1) {
-				b[j] = nd.wbuf[pos + j];
+				b[j] = *((nd.wbuf + (pos + j)): *u8);
 			};
 			block::write(blk: u64, b[..]);
 			pos += take;
@@ -826,7 +879,7 @@ fn do_read(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	if (nodes[id].isdir) {
 		data = listdir(id);
 	} else if (nodes[id].writable) {
-		data = nodes[id].wbuf[..nodes[id].wlen];
+		data = (nodes[id].wbuf: *[_]u8)[..nodes[id].wlen];
 	} else {
 		match (nodes[id].gdsk) {
 		case null =>
@@ -880,17 +933,18 @@ fn do_write(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 		bfp::w_u32(w, f(data, off): u32);
 		return;
 	};
-	if (!nodes[id].writable || off >= BUFSZ) {
+	if (!nodes[id].writable) {
 		bfp::w_u32(w, 0);
 		return;
 	};
 	const nd = &nodes[id];
 	let n = len(data);
-	if (off + n > BUFSZ) {
-		n = BUFSZ - off;
+	if (!wreserve(nd, off + n)) {
+		bfp::w_u32(w, 0);
+		return;
 	};
 	for (let i = 0z; i < n; i += 1) {
-		nd.wbuf[off + i] = data[i];
+		*((nd.wbuf + (off + i)): *u8) = data[i];
 	};
 	if (off + n > nd.wlen) {
 		nd.wlen = off + n;
