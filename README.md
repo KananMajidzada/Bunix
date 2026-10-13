@@ -1,2 +1,2 @@
 # Bunix
-Experimental Kernel writen on Hare
+Experimental Kernel & Os writen on Hare
