@@ -24,8 +24,14 @@ void abort(void) __attribute__((noreturn));
 
 int atoi(const char *s);
 long atol(const char *s);
+long long atoll(const char *s);
 long strtol(const char *s, char **end, int base);
 unsigned long strtoul(const char *s, char **end, int base);
+long long strtoll(const char *s, char **end, int base);
+unsigned long long strtoull(const char *s, char **end, int base);
+double atof(const char *s);
+double strtod(const char *s, char **end);
+float strtof(const char *s, char **end);
 
 int abs(int n);
 long labs(long n);
@@ -37,6 +43,7 @@ void srand(unsigned seed);
 char *getenv(const char *name);
 int system(const char *cmd);
 
+int assert_failed(const char *expr, const char *file, int line);
 void qsort(void *base, size_t n, size_t sz, int (*cmp)(const void *, const void *));
 void *bsearch(const void *key, const void *base, size_t n, size_t sz,
               int (*cmp)(const void *, const void *));

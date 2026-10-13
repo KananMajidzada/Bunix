@@ -57,23 +57,29 @@ fn set(table: uintptr, i: u64, v: u64) void = {
 };
 
 // A fresh address space: the kernel identity-mapped supervisor-only, with a
-// private page table for the 2 MiB user window at 0x400000.
+// private page table pair for the user window at 0x400000. The window is two
+// 2 MiB slots so a compiler has room for its heap, its stack and its argument
+// page without reaching past the window.
 export fn space_new() uintptr = {
 	const pml4 = mem::frames_alloc(1);
 	const pdpt = mem::frames_alloc(1);
 	const pd = mem::frames_alloc(1);
 	const pt = mem::frames_alloc(1);
-	if (pml4 == 0 || pdpt == 0 || pd == 0 || pt == 0) {
+	const pt2 = mem::frames_alloc(1);
+	if (pml4 == 0 || pdpt == 0 || pd == 0 || pt == 0 || pt2 == 0) {
 		return 0;
 	};
 	zero(pml4, 4096);
 	zero(pdpt, 4096);
 	zero(pd, 4096);
 	zero(pt, 4096);
+	zero(pt2, 4096);
 
 	for (let i = 0u64; i < 512; i += 1) {
 		if (i == 2) {
 			set(pd, i, (pt: u64) | ENTRY_P | ENTRY_W | ENTRY_U);
+		} else if (i == 3) {
+			set(pd, i, (pt2: u64) | ENTRY_P | ENTRY_W | ENTRY_U);
 		} else {
 			set(pd, i, (i * 0x200000) | ENTRY_P | ENTRY_W | ENTRY_PS);
 		};
@@ -120,14 +126,20 @@ export fn space_free(space: uintptr) void = {
 	const pml4 = space;
 	const pdpt = (get(pml4, 0) & ~0xFFF): uintptr;
 	const pd = (get(pdpt, 0) & ~0xFFF): uintptr;
-	const pt = (get(pd, 2) & ~0xFFF): uintptr;
-	for (let i = 0u64; i < 512; i += 1) {
-		const e = get(pt, i);
-		if ((e & ENTRY_P) != 0 && (e & ENTRY_U) != 0) {
-			mem::release((e & ~0xFFF): uintptr);
+	// Both halves of the window.
+	for (let slot = 2u64; slot <= 3; slot += 1) {
+		const pt = (get(pd, slot) & ~0xFFF): uintptr;
+		if (pt == 0) {
+			continue;
 		};
+		for (let i = 0u64; i < 512; i += 1) {
+			const e = get(pt, i);
+			if ((e & ENTRY_P) != 0 && (e & ENTRY_U) != 0) {
+				mem::release((e & ~0xFFF): uintptr);
+			};
+		};
+		mem::release(pt);
 	};
-	mem::release(pt);
 	mem::release(pd);
 	mem::release(pdpt);
 	mem::release(pml4);

@@ -45,6 +45,43 @@ FILE *stdin = &stdio_files[0];
 FILE *stdout = &stdio_files[1];
 FILE *stderr = &stdio_files[2];
 
+// Streams the program opened by name. C requires these to be flushed when the
+// process exits, and a compiler that writes an object and returns without
+// closing it depends on exactly that.
+#define MAXSTREAMS 32
+static FILE *streams[MAXSTREAMS];
+static int nstreams;
+
+static void flush_all(void) {
+    for (int i = 0; i < nstreams; i++) {
+        if (streams[i]) {
+            FILE *f = streams[i];
+            streams[i] = NULL;      // in case the flush closes it
+            fflush(f);
+            if (f->flags & F_FILE) {
+                close(f->fd);
+                f->flags &= ~F_FILE;
+            }
+            free(f);
+        }
+    }
+    nstreams = 0;
+}
+
+static void stream_open(FILE *f) {
+    if (!nstreams) atexit(&flush_all);
+    if (nstreams < MAXSTREAMS) streams[nstreams++] = f;
+}
+
+static void stream_gone(FILE *f) {
+    for (int i = 0; i < nstreams; i++) {
+        if (streams[i] == f) {
+            streams[i] = NULL;
+            return;
+        }
+    }
+}
+
 // A sink for vsnprintf: either a real buffer or the stream behind a FILE.
 typedef struct {
     char *buf;
@@ -391,6 +428,28 @@ static int vformat(FILE *f, const char *fmt, va_list ap) {
     return r;
 }
 
+int vfprintf(FILE *f, const char *fmt, va_list ap) {
+    int r = vformat(f, fmt, ap);
+    fflush(f);
+    return r;
+}
+
+int vprintf(const char *fmt, va_list ap) {
+    return vfprintf(stdout, fmt, ap);
+}
+
+int vsprintf(char *buf, const char *fmt, va_list ap) {
+    return vsnprintf(buf, (size_t)-1, fmt, ap);
+}
+
+int fscanf(FILE *f, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsscanf(f ? "" : "", fmt, ap);
+    va_end(ap);
+    return r;
+}
+
 int fprintf(FILE *f, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -516,11 +575,28 @@ FILE *fopen(const char *path, const char *mode) {
     f->flags = ff | F_FILE;
     f->bufpos = 0;
     f->buflen = 0;
+    stream_open(f);
+    return f;
+}
+
+// A stream over an already-open descriptor. POSIX has fclose close that
+// descriptor too, which is what a caller handing over an fd expects: without
+// it the buffered bytes never reach the file.
+FILE *fdopen(int fd, const char *mode) {
+    FILE *f = malloc(sizeof(FILE));
+    if (!f) return NULL;
+    f->fd = fd;
+    f->bufpos = 0;
+    f->buflen = 0;
+    if (mode && mode[0] == 'r') f->flags = F_READ | F_FILE;
+    else f->flags = F_WRITE | F_LINE | F_FILE;
+    stream_open(f);
     return f;
 }
 
 int fclose(FILE *f) {
     if (!f) return EOF;
+    stream_gone(f);
     fflush(f);
     if (f->flags & F_FILE) close(f->fd);
     free(f);

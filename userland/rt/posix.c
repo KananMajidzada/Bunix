@@ -14,11 +14,13 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <time.h>
+#include <sys/mman.h>
 #include <string.h>
 #include <stdlib.h>
 #include "syscalls.h"
 
 #define NFD 16
+#define PAGESZ 4096
 #define BUFCAP 65536
 
 typedef struct {
@@ -71,20 +73,13 @@ int open(const char *p, int flags, ...) {
     memcpy(slots[i].path, p, n + 1);
 
     if (slots[i].wronly) {
-        // A writer starts empty unless it is appending to something that is
+        // A writer starts empty, except when it is appending to what is
         // already there.
-        if (flags & O_APPEND) {
-            uint8_t *tmp = malloc(BUFCAP);
-            if (!tmp) { slots[i].used = 0; return -1; }
-            slots[i].base = (uint64_t)tmp;
-            slots[i].length = small_read(p, tmp, BUFCAP);
-        } else {
-            uint8_t *tmp = malloc(BUFCAP);
-            if (!tmp) { slots[i].used = 0; return -1; }
-            slots[i].base = (uint64_t)tmp;
-            slots[i].length = 0;
-        }
-        if (flags & O_TRUNC) slots[i].length = 0;
+        uint8_t *buf = malloc(BUFCAP);
+        if (!buf) { slots[i].used = 0; return -1; }
+        slots[i].base = (uint64_t)buf;
+        slots[i].length = (flags & O_APPEND) ? small_read(p, buf, BUFCAP) : 0;
+        slots[i].cursor = (flags & O_APPEND) ? slots[i].length : 0;
         if ((flags & O_CREAT) && !slots[i].length) {
             bunix_create(p, 0);
         }
@@ -130,11 +125,22 @@ ssize_t write(int fd, const void *buf, size_t count) {
     }
     if (!valid(fd) || !slots[fd].wronly) return -1;
 
-    size_t n = 0;
+    // A write lands at the cursor, not at the end. Seeking past the end and
+    // writing there is how a program lays out a file with holes in it, which
+    // is exactly what an ELF writer does; the gap reads back as zeroes.
     uint8_t *dst = (uint8_t *)slots[fd].base;
-    while (n < count && slots[fd].length < BUFCAP) {
-        dst[slots[fd].length++] = ((const uint8_t *)buf)[n++];
+    if (slots[fd].cursor > slots[fd].length) {
+        size_t gap = slots[fd].cursor - slots[fd].length;
+        if (slots[fd].cursor > BUFCAP) return -1;
+        memset(dst + slots[fd].length, 0, gap);
+        slots[fd].length = slots[fd].cursor;
     }
+
+    size_t n = 0;
+    while (n < count && slots[fd].cursor < BUFCAP) {
+        dst[slots[fd].cursor++] = ((const uint8_t *)buf)[n++];
+    }
+    if (slots[fd].cursor > slots[fd].length) slots[fd].length = slots[fd].cursor;
     return (ssize_t)n;
 }
 
@@ -161,8 +167,12 @@ long lseek(int fd, long off, int whence) {
     } else {
         return -1;
     }
-    if (n < 0) n = 0;
-    if ((size_t)n > slots[fd].length) n = (long)slots[fd].length;
+    if (n < 0) return -1;
+    // Seeking past the end is allowed on a writer; the gap only becomes part
+    // of the file once something is written there.
+    if (!slots[fd].wronly && (size_t)n > slots[fd].length) {
+        n = (long)slots[fd].length;
+    }
     slots[fd].cursor = (size_t)n;
     return n;
 }
@@ -213,6 +223,9 @@ int ftruncate(int fd, off_t len) {
 int unlink(const char *path) {
     return bunix_remove(path) ? 0 : -1;
 }
+
+// POSIX puts both spellings in circulation.
+int remove(const char *path) { return unlink(path); }
 
 int mkdir(const char *path, int mode) {
     return bunix_create(path, 1) ? 0 : -1;
@@ -352,7 +365,7 @@ time_t time(time_t *t) {
     return v;
 }
 
-int gettimeofday(timeval_t *tv, void *tz) {
+int gettimeofday(struct timeval *tv, void *tz) {
     uint64_t v = uptime_ticks();
     if (tv) {
         tv->tv_sec = (time_t)v;
@@ -365,8 +378,8 @@ clock_t clock(void) {
     return (clock_t)uptime_ticks();
 }
 
-struct_tm *gmtime(const time_t *t) {
-    static struct_tm tm;
+struct tm *gmtime(const time_t *t) {
+    static struct tm tm;
     time_t v = t ? *t : 0;
     long days = (long)v / 86400;
     long secs = (long)v % 86400;
@@ -384,11 +397,11 @@ struct_tm *gmtime(const time_t *t) {
     return &tm;
 }
 
-struct_tm *localtime(const time_t *t) {
+struct tm *localtime(const time_t *t) {
     return gmtime(t);
 }
 
-size_t strftime(char *buf, size_t n, const char *fmt, const struct_tm *tm) {
+size_t strftime(char *buf, size_t n, const char *fmt, const struct tm *tm) {
     size_t w = 0;
     const char *p = fmt;
 
@@ -431,3 +444,24 @@ size_t strftime(char *buf, size_t n, const char *fmt, const struct_tm *tm) {
 }
 
 int system(const char *cmd) { return -1; }
+
+// Mapping. The kernel hands out whole pages for a process, so a mapping is a
+// request for them; the protection bits are not enforced because there is
+// nothing to enforce them against.
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    (void)addr; (void)prot; (void)flags; (void)fd; (void)off;
+    if (!len) return MAP_FAILED;
+    size_t pages = (len + PAGESZ - 1) / PAGESZ;
+    uint8_t *p = bunix_alloc(pages);
+    return p ? (void *)p : MAP_FAILED;
+}
+
+int munmap(void *addr, size_t len) { (void)addr; (void)len; return 0; }
+
+int madvise(void *addr, size_t len, int advice) {
+    (void)addr; (void)len; (void)advice;
+    return 0;
+}
+
+int mlock(void *addr, size_t len) { (void)addr; (void)len; return 0; }
+int munlock(void *addr, size_t len) { (void)addr; (void)len; return 0; }

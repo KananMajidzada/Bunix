@@ -5,12 +5,17 @@ use sched;
 use user;
 
 export const BASE: u64 = 0x400000;
-export const STACK_TOP: u64 = 0x600000;
-export const ARG: u64 = 0x5E0000;
-export const HEAP_END: u64 = 0x5E0000;
+// The window above the image: the heap grows up from the end of the program,
+// then the argument page, then the stack at the top. A compiler needs a good
+// deal of heap, so the region is the whole 4 MiB reserved for user space.
+export const STACK_TOP: u64 = 0x800000;
+export const ARG: u64 = 0x7E0000;
+export const HEAP_END: u64 = 0x7E0000;
 
 def PAGE: u64 = 4096;
-def STACK_PAGES: u64 = 4;
+// The stack has to hold whatever the program recurses with, and a compiler
+// recurses a long way down its own syntax tree.
+def STACK_PAGES: u64 = 16;
 def MAXARG: size = 4096;
 
 type hdr = struct {

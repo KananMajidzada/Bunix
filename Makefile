@@ -9,7 +9,7 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c
+PROGS = hello wc grep cp cc test_c tcc
 
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))
@@ -23,7 +23,7 @@ all: bunix.bin
 
 # The kernel is a freestanding Hare program. HAREPATH is pointed at the tree
 # itself so the build only sees our runtime and modules.
-bunix: user/blob.ha user/progs.ha user/progs.s $(SRCS)
+bunix: user/blob.ha user/progs.ha user/progs.s user/hdrs.ha user/src.ha $(SRCS)
 	HAREPATH=. $(HARE) build -F -a$(ARCH) -o $@
 
 # QEMU's built-in Multiboot loader only accepts 32-bit ELF, so hand it a flat
@@ -51,6 +51,13 @@ user/blob.ha: build/prog.bin
 	   od -An -tu1 -v build/prog.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
 	   printf '];\nexport const entry: u64 = 0x%s;\nexport const image_end: u64 = 0x%s;\n' "$$e" "$$x"; } > $@
 
+# The compiler's own headers, served from /usr/include inside the filesystem.
+user/hdrs.ha: $(wildcard $(TCC_DIR)/include/*.h) tools/embed.py
+	python3 tools/embed.py $(TCC_DIR)/include $@ header
+
+user/src.ha: $(wildcard $(TCC_DIR)/examples/*.c) tools/embed.py
+	python3 tools/embed.py $(TCC_DIR)/examples $@ src
+
 # Each named program is built from its own directory against the shared runtime.
 build/elf_%: $(USER_SRCS)
 	@mkdir -p build
@@ -65,7 +72,8 @@ build/prog_%.bin: build/elf_%
 C_RT_DIR = userland/rt
 C_RT_CFLAGS = -ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
 	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2
-C_RT_SRCS = crt0.S cstart.c heap.c string.c stdio.c posix.c ctype.c
+C_RT_SRCS = crt0.S cstart.c setjmp.S heap.c string.c stdio.c posix.c \
+	ctype.c math.c stdlib.c scan.c stubs.c
 # Every object depends on the headers. They define the syscall ABI, so an
 # object left behind from an older header silently keeps the old calling
 # convention, which is close enough to look right and wrong at run time.
@@ -94,6 +102,21 @@ build/prog_$(1).bin: build/elf_$(1)
 	$(OBJCOPY) -O binary $$< $$@
 endef
 $(foreach p,$(C_PROGS),$(eval $(call C_PROG_RULE,$(p))))
+
+# tcc is a program with sources of its own. Upstream builds it as one
+# translation unit (ONE_SOURCE in its config.h), so a single bcc invocation is
+# all it takes. Its own headers come first, then the runtime's.
+TCC_DIR = tools/tcc
+# The runtime's headers come first: bcc compiles tcc with the host
+# compiler, which has a correct va_list of its own.
+TCC_CFLAGS = -I$(C_RT_DIR) -I$(CURDIR)/$(TCC_DIR) -I$(CURDIR)/$(TCC_DIR)/include
+
+build/elf_tcc: $(TCC_DIR)/tcc.c $(C_RT_DIR)/libc.a tools/bcc/bcc
+	@mkdir -p build
+	./tools/bcc/bcc $(TCC_CFLAGS) -o $@ $<
+
+build/prog_tcc.bin: build/elf_tcc
+	$(OBJCOPY) -O binary $< $@
 
 # Fold the program images into the kernel: their bytes end to end in one blob,
 # with a table naming each one's offset and size.

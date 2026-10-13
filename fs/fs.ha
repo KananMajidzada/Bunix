@@ -558,6 +558,27 @@ export fn init() void = {
 	// expects somewhere writable to exist without creating it first.
 	link(root, mknode("tmp", true));
 
+	// /usr/include holds the compiler's own headers, and /usr/src the examples
+	// it is expected to be able to compile. Both are tables built at compile
+	// time by tools/embed.py.
+	const usr = mknode("usr", true);
+	link(root, usr);
+	const inc = mknode("include", true);
+	link(usr, inc);
+	for (let i = 0z; i < len(user::headers); i += 1) {
+		const h = mknode(*(&user::headers[i].nam: *str), false);
+		nodes[h].content = *(&user::headers[i].bytes: *str);
+		link(inc, h);
+	};
+
+	const share = mknode("src", true);
+	link(usr, share);
+	for (let i = 0z; i < len(user::srcs); i += 1) {
+		const c = mknode(*(&user::srcs[i].nam: *str), false);
+		nodes[c].content = *(&user::srcs[i].bytes: *str);
+		link(share, c);
+	};
+
 	const bin = mknode("bin", true);
 	link(root, bin);
 	// One /bin entry per program image, taken from the same table the loader

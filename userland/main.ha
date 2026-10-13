@@ -206,7 +206,7 @@ export @symbol("main") fn main() void = {
 				rt::println("");
 			} else if (str_eq(cmd, "ls")) {
 				const rootpath: str = "/";
-				run_cat(if (len(rest) == 0) *(&rootpath: *[]u8) else rest);
+				run_ls(if (len(rest) == 0) *(&rootpath: *[]u8) else rest);
 			} else if (str_eq(cmd, "cat")) {
 				run_cat(rest);
 			} else if (str_eq(cmd, "write")) {
@@ -332,6 +332,30 @@ fn str_eq(b: []u8, s: str) bool = {
 		};
 	};
 	return true;
+};
+
+// Lists a directory. A directory has no contents to read as a file, so this
+// goes through readdir instead.
+fn run_ls(path: []u8) void = {
+	let buf: [512]u8 = [0...];
+	const n = rt::readdir(*(&path: *str), buf[..]);
+	if (n == 0) {
+		rt::print("ls: nothing in ");
+		rt::println(*(&path: *str));
+		return;
+	};
+	let start = 0z;
+	for (let i = 0z; i <= n; i += 1) {
+		if (i == n || buf[i] == ('\n': u8)) {
+			if (i > start) {
+				for (let j = start; j < i; j += 1) {
+					rt::putc(buf[j]);
+				};
+				rt::println("");
+			};
+			start = i + 1;
+		};
+	};
 };
 
 fn run_cat(path: []u8) void = {

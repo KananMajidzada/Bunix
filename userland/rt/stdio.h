@@ -11,6 +11,8 @@
 
 typedef long fpos_t;
 
+int atexit(void (*fn)(void));
+
 #define EOF (-1)
 #define BUFSIZ 1024
 #define SEEK_SET 0
@@ -36,7 +38,12 @@ int fprintf(FILE *f, const char *fmt, ...) __attribute__((format(printf, 2, 3)))
 int sprintf(char *buf, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 int snprintf(char *buf, size_t n, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 int vprintf(const char *fmt, va_list ap);
+int vfprintf(FILE *f, const char *fmt, va_list ap);
+int vsprintf(char *buf, const char *fmt, va_list ap);
 int vsnprintf(char *buf, size_t n, const char *fmt, va_list ap);
+
+// Bunix addition: the raw bits of a double, for checking a varargs path.
+int printf(const char *fmt, ...);
 
 int puts(const char *s);
 int fputs(const char *s, FILE *f);
@@ -49,6 +56,7 @@ int getc(FILE *f);
 char *fgets(char *s, int n, FILE *f);
 
 FILE *fopen(const char *path, const char *mode);
+FILE *fdopen(int fd, const char *mode);
 int fclose(FILE *f);
 int fflush(FILE *f);
 size_t fread(void *buf, size_t sz, size_t n, FILE *f);
@@ -59,5 +67,10 @@ void rewind(FILE *f);
 int feof(FILE *f);
 int ferror(FILE *f);
 void perror(const char *s);
+
+int remove(const char *path);
+int sscanf(const char *s, const char *fmt, ...);
+int vsscanf(const char *s, const char *fmt, va_list ap);
+int fscanf(FILE *f, const char *fmt, ...);
 
 #endif
