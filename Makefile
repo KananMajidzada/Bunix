@@ -7,8 +7,16 @@ include config.mk
 SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 
 # Programs that get an image of their own. The shell runs them by name.
+# Each one ends up as both a real ELF (for nm, to read _start and __image_end)
+# and a flat blob (the bytes the loader copies into user memory).
 PROGS = hello wc grep cp cc test_c
-PROG_ELFS = $(addprefix build/elf_,$(filter-out test_c,$(PROGS)))
+
+# Programs written in Hare, built by the Hare compiler.
+HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))
+# Programs written in C, cross-compiled on the host by bcc.
+C_PROGS = test_c
+
+PROG_ELFS = $(addprefix build/elf_,$(PROGS))
 PROG_BINS = $(addprefix build/prog_,$(addsuffix .bin,$(PROGS)))
 
 all: bunix.bin
@@ -51,17 +59,38 @@ build/elf_%: $(USER_SRCS)
 build/prog_%.bin: build/elf_%
 	$(OBJCOPY) -O binary $< $@
 
-# test_c is cross-compiled with bcc; copy its binary and create a minimal ELF for nm
-build/prog_test_c.bin: build/test_c.bin
-	cp $< $@
+# The C runtime that cross-compiled programs link against. It is freestanding:
+# no host libc, no host stack protector (its canary read would fault on an
+# unset %fs), and no SSE, since we do not hand the process an FPU state.
+C_RT_DIR = userland/rt
+C_RT_CFLAGS = -ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
+	-fno-stack-protector -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -O2
+C_RT_SRCS = crt0.S cstart.c heap.c string.c stdio.c posix.c ctype.c
+# Every object depends on the headers. They define the syscall ABI, so an
+# object left behind from an older header silently keeps the old calling
+# convention, which is close enough to look right and wrong at run time.
+C_RT_HDRS = $(wildcard $(C_RT_DIR)/*.h) $(wildcard $(C_RT_DIR)/sys/*.h)
+C_RT_OBJS = $(patsubst %,build/rt/%.o,$(basename $(C_RT_SRCS)))
 
-build/elf_test_c: build/test_c.bin
+build/rt/%.o: $(C_RT_DIR)/%.c $(C_RT_HDRS)
+	@mkdir -p build/rt
+	$(CC) $(C_RT_CFLAGS) -I$(C_RT_DIR) -c $< -o $@
+
+build/rt/%.o: $(C_RT_DIR)/%.S $(C_RT_HDRS)
+	@mkdir -p build/rt
+	$(CC) $(C_RT_CFLAGS) -c $< -o $@
+
+$(C_RT_DIR)/libc.a: $(C_RT_OBJS)
+	$(AR) rcs $@ $(C_RT_OBJS)
+
+# C programs: bcc compiles and links against the runtime above, producing a real
+# ELF at 0x400000 whose __image_end covers .bss as well as text and data.
+build/elf_test_c: tools/bcc/test.c $(C_RT_DIR)/libc.a tools/bcc/bcc
 	@mkdir -p build
-	@# Create a minimal ELF with __image_end symbol for the progs.ha generator
-	@# The binary is linked at 0x400000; __image_end = 0x400000 + size
-	@size=$$(wc -c < build/test_c.bin); \
-	end=$$(printf "0x%x" $$((0x400000 + $$size))); \
-	echo "SECTIONS { . = 0x400000; __image_end = $$end; }" | $(LD) -T /dev/stdin -o $@ /dev/null
+	./tools/bcc/bcc -o $@ $<
+
+build/prog_test_c.bin: build/elf_test_c
+	$(OBJCOPY) -O binary $< $@
 
 # Fold the program images into the kernel: their bytes end to end in one blob,
 # with a table naming each one's offset and size.
@@ -71,16 +100,15 @@ build/progs.bin: $(PROG_BINS)
 user/progs.s: build/progs.bin
 	@{ printf '.section .rodata\n.global user.blobs\nuser.blobs:\n.incbin "build/progs.bin"\n'; } > $@
 
-user/progs.ha: build/progs.bin $(PROG_ELFS) build/elf_test_c
+user/progs.ha: build/progs.bin $(PROG_ELFS)
 	@{ printf 'export type program = struct {\n\tnam: str,\n\toff: size,\n\tbytes: size,\n\tend: u64,\n\tentry: u64,\n};\n\n'; \
 	   printf 'export @symbol("user.blobs") const blobs: u8;\n\n'; \
 	   printf 'export const programs: [%s]program = [\n' "$$(echo $(PROGS) | wc -w)"; \
 	   off=0; \
 	   for p in $(PROGS); do \
 	     n=$$(wc -c < build/prog_$$p.bin); \
-	     x=$$(nm build/elf_$$p 2>/dev/null | awk '$$3 == "__image_end" { print $$1 }'); \
-	     e=$$(nm build/elf_$$p 2>/dev/null | awk '$$3 == "_start" { print $$1 }'); \
-	     if [ -z "$$e" ]; then e="400000"; fi; \
+	     x=$$(nm build/elf_$$p | awk '$$3 == "__image_end" { print $$1 }'); \
+	     e=$$(nm build/elf_$$p | awk '$$3 == "_start" { print $$1 }'); \
 	     printf '\tprogram { nam = "%s", off = %s, bytes = %s, end = 0x%s, entry = 0x%s },\n' "$$p" "$$off" "$$n" "$$x" "$$e"; \
 	     off=$$((off + n)); \
 	   done; \

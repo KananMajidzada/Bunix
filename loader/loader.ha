@@ -141,8 +141,6 @@ fn run_with(arg: str, fresh: bool) size = {
 	for (let i = 0z; i < len(payload); i += 1) {
 		*((aframe + (i: uintptr)): *u8) = payload[i];
 	};
-	// Store argument length at ARG_LEN (ARG + 8) for C runtime
-	*((aframe + 8: uintptr): *u64) = len(payload): u64;
 
 	const id = sched::spawn_user(
 		entry: uintptr,

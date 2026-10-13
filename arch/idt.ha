@@ -20,6 +20,12 @@ export type registers = struct {
 export let sched_hook: nullable *fn(regs: *registers) uintptr = null;
 export let syscall_hook: nullable *fn(regs: *registers) uintptr = null;
 
+// The address a fault was raised for, kept by the page-fault stub.
+
+@symbol("arch.cr2_addr") let cr2_addr: u64;
+
+export fn fault_address() u64 = return cr2_addr;
+
 type gate = struct @packed {
 	off_low: u16,
 	sel: u16,

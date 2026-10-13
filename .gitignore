@@ -1,5 +1,12 @@
-/bunix
-/bunix.bin
-*.o
-.cache/
-.bin/
+build/
+bunix
+bunix.bin
+user/blob.ha
+user/progs.ha
+user/progs.s
+userland/rt/libc.a
+userland/rt/*.o
+userland/rt/*.ha.o
+tools/bcc/__pycache__/
+tools/bcc/a.out
+tools/bcc/a.out.bin

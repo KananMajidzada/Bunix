@@ -1,4 +1,12 @@
-// C syscall wrappers for Bunix
+// syscalls.h - direct interface to Bunix's native system calls.
+//
+// The native calls do not follow POSIX. In particular a path always arrives as
+// a pointer and a separate length, because the kernel reads the length out of
+// the register rather than walking for a NUL. These wrappers take that shape
+// and hide it, so callers can hand over an ordinary C string.
+//
+// Register use is rax for the call number, rdi/rsi/rdx/rcx for the arguments,
+// and rax for the result.
 
 #ifndef BUNIX_SYSCALLS_H
 #define BUNIX_SYSCALLS_H
@@ -8,21 +16,20 @@
 
 typedef long ssize_t;
 
-#define SYS_EXIT       0
-#define SYS_WRITE      1
-#define SYS_READFILE   2
-#define SYS_ALLOC      3
-#define SYS_WRITEFILE  4
-#define SYS_READCHR    5
-#define SYS_YIELD      6
-#define SYS_CREATE     7
-#define SYS_REMOVE     8
-#define SYS_READFILE   2
-#define SYS_REaddir    9
-#define SYS_HALT      10
-#define SYS_SPAWN     11
-#define SYS_ALIVE     12
-#define SYS_FRESH     13
+#define SYS_EXIT        0
+#define SYS_WRITE       1
+#define SYS_READFILE    2
+#define SYS_ALLOC       3
+#define SYS_WRITEFILE   4
+#define SYS_READCHR     5
+#define SYS_YIELD       6
+#define SYS_CREATE      7
+#define SYS_REMOVE      8
+#define SYS_REaddir     9
+#define SYS_HALT        10
+#define SYS_SPAWN       11
+#define SYS_ALIVE       12
+#define SYS_FRESH       13
 #define SYS_SPAWN_SHARED 14
 
 static inline uint64_t syscall0(uint64_t n) {
@@ -55,56 +62,76 @@ static inline uint64_t syscall4(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a
     return ret;
 }
 
+// Paths cross the boundary as (pointer, length), so the wrappers need the
+// length without depending on the C library.
+static inline uint64_t path_len(const char *p) {
+    uint64_t n = 0;
+    while (p[n]) n++;
+    return n;
+}
+
 static inline void bunix_exit(int code) {
     syscall1(SYS_EXIT, code);
 }
 
-static inline ssize_t bunix_write(int fd, const void *buf, size_t count) {
-    return syscall3(SYS_WRITE, fd, (uint64_t)buf, count);
+// To the console. There is no descriptor on the native side.
+static inline ssize_t bunix_write(const void *buf, size_t len) {
+    return (ssize_t)syscall2(SYS_WRITE, (uint64_t)buf, len);
 }
 
 static inline ssize_t bunix_readfile(const char *path, void *buf, size_t count) {
-    return syscall3(SYS_READFILE, (uint64_t)path, (uint64_t)buf, count);
+    uint64_t n = path_len(path);
+    return (ssize_t)syscall4(SYS_READFILE, (uint64_t)path, n, (uint64_t)buf, count);
 }
 
 static inline ssize_t bunix_writefile(const char *path, const void *buf, size_t count) {
-    return syscall3(SYS_WRITEFILE, (uint64_t)path, (uint64_t)buf, count);
+    uint64_t n = path_len(path);
+    return (ssize_t)syscall4(SYS_WRITEFILE, (uint64_t)path, n, (uint64_t)buf, count);
+}
+
+static inline int bunix_readdir(const char *path, void *buf, size_t count) {
+    uint64_t n = path_len(path);
+    return (int)syscall4(SYS_REaddir, (uint64_t)path, n, (uint64_t)buf, count);
+}
+
+static inline int bunix_create(const char *path, int isdir) {
+    uint64_t n = path_len(path);
+    return (int)syscall3(SYS_CREATE, (uint64_t)path, n, isdir);
+}
+
+static inline int bunix_remove(const char *path) {
+    uint64_t n = path_len(path);
+    return (int)syscall2(SYS_REMOVE, (uint64_t)path, n);
 }
 
 static inline int bunix_readchr(void) {
-    return syscall0(SYS_READCHR);
+    return (int)syscall0(SYS_READCHR);
 }
 
 static inline void bunix_yield(void) {
     syscall0(SYS_YIELD);
 }
 
-static inline int bunix_create(const char *path, int isdir) {
-    return syscall2(SYS_CREATE, (uint64_t)path, isdir);
-}
-
-static inline int bunix_remove(const char *path) {
-    return syscall1(SYS_REMOVE, (uint64_t)path);
-}
-
-static inline int bunix_readdir(const char *path, void *buf, size_t count) {
-    return syscall3(SYS_REaddir, (uint64_t)path, (uint64_t)buf, count);
+static inline uint8_t *bunix_alloc(uint64_t pages) {
+    return (uint8_t *)syscall1(SYS_ALLOC, pages);
 }
 
 static inline uint64_t bunix_spawn(const char *path) {
-    return syscall2(SYS_SPAWN, (uint64_t)path, 0);
+    uint64_t n = path_len(path);
+    return syscall2(SYS_SPAWN, (uint64_t)path, n);
 }
 
 static inline uint64_t bunix_spawn_shared(const char *path) {
-    return syscall2(SYS_SPAWN_SHARED, (uint64_t)path, 0);
+    uint64_t n = path_len(path);
+    return syscall2(SYS_SPAWN_SHARED, (uint64_t)path, n);
 }
 
 static inline int bunix_alive(uint64_t id) {
-    return syscall1(SYS_ALIVE, id);
+    return (int)syscall1(SYS_ALIVE, id);
 }
 
 static inline int bunix_fresh(void) {
-    return syscall0(SYS_FRESH);
+    return (int)syscall0(SYS_FRESH);
 }
 
 static inline void bunix_halt(void) {

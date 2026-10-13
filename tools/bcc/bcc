@@ -1,95 +1,173 @@
 #!/usr/bin/env python3
-"""
-bcc - Bunix C cross-compiler driver
-Runs on host, produces flat binaries linked at 0x400000 for Bunix.
+"""bcc - Bunix C cross-compiler driver.
+
+Runs on the host and produces a static x86-64 image linked at 0x400000, in the
+shape Bunix's loader wants: a flat blob plus a real ELF for reading the entry
+and the image end.
+
+Usage:
+    bcc -o out file.c ...      compile and link
+    bcc -c file.c              compile to .o
+    bcc -E file.c              preprocess only
+    bcc --print-search-dirs
 """
 
-import os
-import sys
-import subprocess
 import argparse
+import os
+import subprocess
+import sys
 
-DEFAULT_CC = "cc"
-DEFAULT_CFLAGS = "-ffreestanding -nostdlib -fno-pic -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -O2"
-DEFAULT_LDFLAGS = "-nostdlib -static -T"
+# Bunix has no host libc, no dynamic loader, and no FPU state, so the code has
+# to be freestanding and scalar. Stack protector stays off: the canary lives in
+# %fs, which a Bunix process never sets up.
+CFLAGS = [
+    "-ffreestanding",
+    "-nostdlib",
+    "-fno-pic",
+    "-fno-pie",
+    "-fno-stack-protector",
+    "-mno-red-zone",
+    "-mno-mmx",
+    "-mno-sse",
+    "-mno-sse2",
+    "-mcmodel=small",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-unwind-tables",
+    "-O2",
+]
 
-def find_runtime_dir():
-    """Find the Bunix userland runtime directory."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, "..", "..", "userland")
+LDFLAGS = ["-nostdlib", "-static", "-no-pie"]
 
-def run_cmd(cmd, verbose=False):
+# Warnings worth turning on for ported code, minus the ones that only make
+# noise about a freestanding target.
+WARNINGS = [
+    "-Wall",
+    "-Wextra",
+    "-Wno-unused-parameter",
+    "-Wno-unused-function",
+    "-Wno-unused-variable",
+    "-Wno-missing-field-initializers",
+    "-Wno-implicit-fallthrough",
+]
+
+
+def runtime_dir():
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "userland"
+    )
+
+
+def rt_dir():
+    return os.path.join(runtime_dir(), "rt")
+
+
+def run(cmd, verbose, what):
     if verbose:
-        print(f"bcc: {cmd}", file=sys.stderr)
-    result = subprocess.run(cmd, shell=True)
-    return result.returncode
+        print("bcc: " + " ".join(cmd), file=sys.stderr)
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        print(f"bcc: {what} failed", file=sys.stderr)
+        sys.exit(r.returncode)
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Bunix C cross-compiler")
-    parser.add_argument("-o", "--output", help="Output file")
-    parser.add_argument("-c", action="store_true", help="Compile only (produce .o)")
-    parser.add_argument("-S", action="store_true", help="Emit assembly (produce .s)")
-    parser.add_argument("-v", "-vv", action="store_true", help="Verbose")
-    parser.add_argument("-k", action="store_true", help="Keep object files")
-    parser.add_argument("inputs", nargs="+", help="Input C files")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(prog="bcc", add_help=True)
+    p.add_argument("-o", "--output")
+    p.add_argument("-c", action="store_true", help="compile only")
+    p.add_argument("-E", action="store_true", help="preprocess only")
+    p.add_argument("-S", action="store_true", help="emit assembly")
+    p.add_argument("-k", action="store_true", help="keep intermediates")
+    p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("-nostdinc", action="store_true")
+    p.add_argument("-I", dest="includes", action="append", default=[])
+    p.add_argument("-D", dest="defines", action="append", default=[])
+    p.add_argument("-l", dest="libs", action="append", default=[])
+    p.add_argument("-L", dest="libdirs", action="append", default=[])
+    p.add_argument("--include", default=None,
+                   help="directory holding the Bunix runtime headers")
+    p.add_argument("--print-search-dirs", action="store_true")
+    p.add_argument("inputs", nargs="*")
+    args = p.parse_args()
 
-    runtime_dir = find_runtime_dir()
-    c_link_script = os.path.join(runtime_dir, "rt", "c.ld")
-    include_dir = os.path.join(runtime_dir, "rt")
+    inc = rt_dir() if args.include is None else args.include
+    link_script = os.path.join(rt_dir(), "c.ld")
+    libc = os.path.join(rt_dir(), "libc.a")
 
-    if not os.path.exists(c_link_script):
-        print(f"bcc: C linker script not found at {c_link_script}", file=sys.stderr)
+    if args.print_search_dirs:
+        print(f"runtime: {rt_dir()}")
+        print(f"headers: {inc}")
+        print(f"libc:    {libc}")
+        return
+
+    if not args.inputs:
+        p.error("no input files")
+
+    cc = os.environ.get("CC", "cc")
+
+    def compile_flags():
+        f = list(CFLAGS) + list(WARNINGS) + [f"-I{inc}"]
+        if not args.nostdinc:
+            # Host headers are still useful for compiler-provided things like
+            # stdarg.h and stddef.h.
+            f += ["-isystem", os.path.join(sys.prefix, "include")]
+        for d in args.defines:
+            f.append(f"-D{d}")
+        for i in args.includes:
+            f.append(f"-I{i}")
+        return f
+
+    cf = compile_flags()
+
+    if args.E:
+        run([cc, "-E", *cf, *args.inputs], args.verbose, "preprocessing")
+        return
+
+    if args.S:
+        out = args.output or os.path.splitext(os.path.basename(args.inputs[0]))[0] + ".s"
+        run([cc, "-S", *cf, *args.inputs, "-o", out], args.verbose, "compiling")
+        return
+
+    # -c stops after compiling each file.
+    if args.c:
+        out = args.output or os.path.splitext(os.path.basename(args.inputs[0]))[0] + ".o"
+        run([cc, "-c", *cf, *args.inputs, "-o", out], args.verbose, "compiling")
+        return
+
+    if not os.path.exists(libc):
+        print(f"bcc: runtime not built: {libc}", file=sys.stderr)
+        print("bcc: run make first", file=sys.stderr)
         sys.exit(1)
 
-    cc = DEFAULT_CC
-    cflags = f"{DEFAULT_CFLAGS} -I{include_dir}"
-    output = args.output
-    compile_only = args.c
-    emit_asm = args.S
-    verbose = args.v
-    keep_objects = args.k
-    input_files = args.inputs
+    out = args.output or "a.out"
+    workdir = os.path.dirname(os.path.abspath(out)) or "."
 
-    if not output:
-        if compile_only or emit_asm:
-            base = os.path.splitext(os.path.basename(input_files[0]))[0]
-            output = base + (".s" if emit_asm else ".o")
-        else:
-            output = "a.out"
+    objs = []
+    for src in args.inputs:
+        base = os.path.splitext(os.path.basename(src))[0]
+        obj = os.path.join(workdir, base + ".o")
+        run([cc, "-c", *cf, src, "-o", obj], args.verbose, f"compiling {src}")
+        objs.append(obj)
 
-    obj_files = []
-    for input_file in input_files:
-        base = os.path.splitext(os.path.basename(input_file))[0]
-        obj = base + ".o"
-        obj_files.append(obj)
+    link = [cc, *LDFLAGS, "-T", link_script, "-o", out, *objs, libc]
+    for d in args.libdirs:
+        link.append(f"-L{d}")
+    for l in args.libs:
+        link.append(f"-l{l}")
+    run(link, args.verbose, "linking")
 
-        cmd = f"{cc} {cflags} -c {input_file} -o {obj}"
-        if run_cmd(cmd, verbose) != 0:
-            print(f"bcc: compilation failed for {input_file}", file=sys.stderr)
-            sys.exit(1)
+    # Bunix wants the raw bytes too: the kernel folds these into its image and
+    # the loader copies them into user memory.
+    run(["objcopy", "-O", "binary", out, out + ".bin"], args.verbose, "objcopy")
 
-    if not compile_only and not emit_asm:
-        libc_path = os.path.join(runtime_dir, "rt", "libc.a")
-        objs_str = " ".join(obj_files)
-        cmd = f"{cc} {DEFAULT_LDFLAGS} {c_link_script} -o {output} {objs_str} {libc_path}"
-        if run_cmd(cmd, verbose) != 0:
-            print("bcc: linking failed", file=sys.stderr)
-            sys.exit(1)
+    if not args.k:
+        for obj in objs:
+            try:
+                os.remove(obj)
+            except OSError:
+                pass
 
-        cmd2 = f"objcopy -O binary {output} {output}.bin"
-        if run_cmd(cmd2, verbose) != 0:
-            print("bcc: objcopy failed", file=sys.stderr)
-            sys.exit(1)
-        print(f"bcc: created {output}.bin (flat binary for Bunix)")
+    print(f"bcc: {out} (+ {out}.bin)")
 
-    if not keep_objects:
-        for obj in obj_files:
-            if obj != output:
-                try:
-                    os.remove(obj)
-                except OSError:
-                    pass
 
 if __name__ == "__main__":
     main()

@@ -21,12 +21,15 @@ fn on_fault(regs: *arch::registers) uintptr = {
 	console::printnum(regs.error);
 	console::print(" at ");
 	console::printnum(regs.rip);
+	console::print(" addr ");
+	console::printnum(arch::fault_address());
 	console::putc('\n');
 	if ((regs.cs & 3) == 3) {
 		console::println("killing user process");
 		return sched::fault_kill();
 	};
-	return 0;
+	console::println("kernel fault, halting");
+	rt::halt();
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {

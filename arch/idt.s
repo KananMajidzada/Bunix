@@ -1,5 +1,12 @@
 .text
 
+.section .data
+.global arch.cr2_addr
+arch.cr2_addr:
+	.quad 0
+
+.text
+
 .macro isr_noerr n
 isr_\n:
 	pushq $0
@@ -27,7 +34,14 @@ isr_err   10
 isr_err   11
 isr_err   12
 isr_err   13
-isr_err   14
+
+# Page fault: keep the faulting address before the frame is built.
+isr_14:
+	movq %cr2, %rax
+	movq %rax, arch.cr2_addr(%rip)
+	pushq $14
+	jmp isr_common
+
 isr_noerr 15
 isr_noerr 16
 isr_err   17

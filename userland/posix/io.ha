@@ -19,7 +19,37 @@ export def STDIN: int = 0;
 export def STDOUT: int = 1;
 export def STDERR: int = 2;
 
-def NFD: int = 8;
+export def O_APPEND: int = 0x400;
+export def O_BINARY: int = 0;
+
+export def PROT_READ: int = 1;
+export def PROT_WRITE: int = 2;
+export def PROT_EXEC: int = 4;
+export def MAP_SHARED: int = 1;
+export def MAP_PRIVATE: int = 2;
+export def MAP_FIXED: int = 0x10;
+export def MAP_ANONYMOUS: int = 0x20;
+
+export def F_SETLKW: int = 7;
+export def F_RDLCK: int = 0;
+export def F_WRLCK: int = 1;
+export def F_UNLCK: int = 2;
+
+export def SIGFPE: int = 8;
+export def SIGILL: int = 4;
+export def SIGSEGV: int = 11;
+export def SIGBUS: int = 7;
+export def SIGABRT: int = 6;
+export def SIGUSR1: int = 10;
+export def SIGCHLD: int = 17;
+
+export def SA_SIGINFO: int = 4;
+
+export def R_OK: int = 4;
+export def W_OK: int = 2;
+export def X_OK: int = 1;
+
+def NFD: int = 16;
 def BUFCAP: size = 65536;
 
 type hdr = struct {
@@ -203,4 +233,204 @@ export fn strcpy(dst: *u8, src: *const u8) *u8 = {
 	};
 	pd[i] = 0;
 	return dst;
+};
+
+export fn getcwd(buf: *u8, nsize: size) *u8 = {
+	const cwd: str = "/";
+	const cwd_bytes = *(&cwd: *[]u8);
+	const pb = (buf: uintptr): *[*]u8;
+	let n = len(cwd_bytes);
+	if (n >= nsize) { n = nsize - 1; };
+	for (let i = 0z; i < n; i += 1) { pb[i] = cwd_bytes[i]; };
+	pb[n] = 0;
+	return buf;
+};
+
+export fn chdir(path: *const u8) int = {
+	return 0;
+};
+
+export fn mkdir(path: *const u8, mode: int) int = {
+	return if (rt::mkdir(*(&path: *str))) 0 else -1;
+};
+
+export fn rmdir(path: *const u8) int = {
+	return if (rt::remove(*(&path: *str))) 0 else -1;
+};
+
+export fn access(path: *const u8, mode: int) int = {
+	return 0;
+};
+
+export fn unlink(path: *const u8) int = {
+	return if (rt::remove(*(&path: *str))) 0 else -1;
+};
+
+export fn rename(oldpath: *const u8, newpath: *const u8) int = {
+	return -1;
+};
+
+// The kernel clock is /proc/uptime, a decimal count of seconds since boot.
+export fn time(tloc: nullable *u64) u64 = {
+	let buf: [32]u8 = [0...];
+	const n = rt::readfile("/proc/uptime", buf[..]);
+	let v: u64 = 0;
+	for (let i = 0z; i < n; i += 1) {
+		const c = buf[i];
+		if (c < ('0': u8) || c > ('9': u8)) {
+			break;
+		};
+		v = v * 10 + ((c - ('0': u8)): u64);
+	};
+	match (tloc) {
+	case null => void;
+	case let p: *u64 => *p = v;
+	};
+	return v;
+};
+
+export fn gettimeofday(tv: nullable *u64, tz: *opaque) int = {
+	const t = time(null);
+	match (tv) {
+	case null => void;
+	case let p: *u64 => *p = t;
+	};
+	return 0;
+};
+
+export fn signal(sig: int, handler: *opaque) nullable *opaque = {
+	return null;
+};
+
+export fn sigaction(sig: int, act: *opaque, oldact: *opaque) int = {
+	return 0;
+};
+
+export fn fork() int = {
+	return -1;
+};
+
+export fn execv(path: *const u8, argv: *const *const u8) int = {
+	return -1;
+};
+
+export fn waitpid(pid: int, status: *int, options: int) int = {
+	return -1;
+};
+
+export fn pipe(fds: *int) int = {
+	return -1;
+};
+
+export fn dup(fd: int) int = {
+	return -1;
+};
+
+export fn dup2(oldfd: int, newfd: int) int = {
+	return -1;
+};
+
+export fn fcntl(fd: int, cmd: int, arg: int) int = {
+	return 0;
+};
+
+export fn fstat(fd: int, st: *opaque) int = {
+	if (fd < 0 || fd >= NFD || !used[fd: size]) {
+		return -1;
+	};
+	const j = fd: size;
+	// struct stat: st_size sits at offset 48 on x86-64.
+	const p = st: uintptr;
+	for (let i = 0z; i < 8; i += 1) {
+		*((p + 48 + (i: uintptr)): *u8) = (length[j] >> (i * 8)): u8;
+	};
+	return 0;
+};
+
+// tcc maps input files and anonymous scratch. A file's bytes were already
+// slurped at open, so a mapping just copies them into fresh pages.
+export fn mmap(addr: *opaque, nlen: size, prot: int, flags: int, fd: int, off: int) nullable *opaque = {
+	let pages = (nlen + 4095z) / 4096z;
+	if (pages == 0) {
+		pages = 1;
+	};
+	const p = rt::page_alloc(pages: u64);
+	if (p == 0) {
+		return null;
+	};
+	if (fd >= 0 && fd < NFD && used[fd: size] && !wronly[fd: size]) {
+		const j = fd: size;
+		if (off >= 0 && (off: size) < length[j]) {
+			let n = length[j] - (off: size);
+			if (n > nlen) {
+				n = nlen;
+			};
+			const src = as_slice(base[j] + (off: size), n);
+			for (let i = 0z; i < n; i += 1) {
+				*((p + i): *u8) = src[i];
+			};
+		};
+	};
+	return p: *opaque;
+};
+
+export fn munmap(addr: *opaque, nlen: size) int = {
+	return 0;
+};
+
+export type dirent = struct {
+	d_ino: u64,
+	d_off: u64,
+	d_reclen: u16,
+	d_type: u8,
+	d_name: [256]u8,
+};
+
+export type DIR = struct {
+	buf: [4096]u8,
+	nlen: size,
+	off: size,
+	ent: dirent,
+};
+
+export fn opendir(name: *const u8) nullable *DIR = {
+	const mem = rt::malloc(size(DIR));
+	const d = match (mem) {
+	case null => return null;
+	case let q: *opaque => yield q: *DIR;
+	};
+	d.off = 0;
+	d.nlen = rt::readdir(*(&name: *str), d.buf[..]);
+	return d;
+};
+
+// The kernel lists a directory as newline-separated names, so readdir just
+// hands back one line at a time.
+export fn readdir(dirp: *DIR) nullable *dirent = {
+	if (dirp.off >= dirp.nlen) {
+		return null;
+	};
+	const start = dirp.off;
+	let i = start;
+	for (i < dirp.nlen && dirp.buf[i] != ('\n': u8)) {
+		i += 1;
+	};
+	const l = i - start;
+	let k = 0z;
+	for (k < l && k < 255z) {
+		dirp.ent.d_name[k] = dirp.buf[start + k];
+		k += 1;
+	};
+	dirp.ent.d_name[k] = 0;
+	dirp.ent.d_ino = 0;
+	dirp.ent.d_off = (i + 1): u64;
+	dirp.ent.d_reclen = l: u16;
+	dirp.ent.d_type = 0;
+	dirp.off = if (i < dirp.nlen) i + 1 else dirp.nlen;
+	return &dirp.ent;
+};
+
+export fn closedir(dirp: *DIR) int = {
+	rt::free_((dirp: *opaque));
+	return 0;
 };

@@ -5,6 +5,7 @@ use console;
 use mem;
 use sched;
 use sys;
+use user;
 
 def MAXNODE: size = 128;
 def MAXHANDLE: size = 16;
@@ -39,13 +40,53 @@ export type ns = struct {
 	owned: bool,
 };
 
+// Handles and node ids both come off the wire in some paths, so every index
+// into hnode[] or nodes[] is checked here rather than at each use. A bad value
+// is reported once so a caller turning it into a missing file does not turn
+// into a wild pointer.
+let warned_handle: bool = false;
+let warned_node: bool = false;
+
+fn bad_handle(fid: size) void = {
+	if (warned_handle) {
+		return;
+	};
+	warned_handle = true;
+	console::print("fs: handle out of range: ");
+	console::printnum(fid: u64);
+	console::println("");
+};
+
+fn bad_node(id: size) void = {
+	if (warned_node) {
+		return;
+	};
+	warned_node = true;
+	console::print("fs: node out of range: ");
+	console::printnum(id: u64);
+	console::println("");
+};
+
 fn hold(s: *ns, fid: size, node: size) void = {
+	if (fid >= MAXHANDLE) {
+		bad_handle(fid);
+		return;
+	};
 	s.inuse[fid] = true;
 	s.hnode[fid] = node;
 };
 
 fn hget(s: *ns, fid: size) size = {
-	return s.hnode[fid];
+	if (fid >= MAXHANDLE) {
+		bad_handle(fid);
+		return NOCHILD;
+	};
+	const id = s.hnode[fid];
+	if (id >= MAXNODE) {
+		bad_node(id);
+		return NOCHILD;
+	};
+	return id;
 };
 
 let freehead: size = NOCHILD;
@@ -513,14 +554,20 @@ export fn init() void = {
 	nodes[hello].content = "hello from the Bunix File Protocol\n";
 	link(root, hello);
 
+	// /tmp belongs to every namespace, shared or private: a ported program
+	// expects somewhere writable to exist without creating it first.
+	link(root, mknode("tmp", true));
+
 	const bin = mknode("bin", true);
 	link(root, bin);
-	link(bin, mknode("hello", false));
-	link(bin, mknode("wc", false));
-	link(bin, mknode("grep", false));
-	link(bin, mknode("cp", false));
-	link(bin, mknode("cc", false));
-	link(bin, mknode("test_c", false));
+	// One /bin entry per program image, taken from the same table the loader
+	// reads, so the names here can never drift from what the shell can run.
+	for (let i = 0z; i < len(user::programs); i += 1) {
+		const nm = *(&user::programs[i].nam: *str);
+		const id = mknode(nm, false);
+		nodes[id].content = "";
+		link(bin, id);
+	};
 
 	link(dev, mknode("null", false));
 
@@ -632,6 +679,10 @@ fn name_eq(a: str, b: []u8) bool = {
 };
 
 fn find(parent: size, name: []u8) size = {
+	if (parent >= MAXNODE) {
+		bad_node(parent);
+		return NOCHILD;
+	};
 	const nd = &nodes[parent];
 	if (!nd.isdir) {
 		return NOCHILD;
@@ -664,11 +715,20 @@ fn unlink(id: size) void = {
 };
 
 fn kind_of(id: size) u8 = {
+	if (id >= MAXNODE) {
+		bad_node(id);
+		return 0;
+	};
 	return if (nodes[id].isdir) bfp::IDDIR else 0;
 };
 
 fn listdir(id: size) []u8 = {
 	let n = 0z;
+	if (id >= MAXNODE) {
+		bad_node(id);
+		let empty: []u8 = [];
+		return empty;
+	};
 	const nd = &nodes[id];
 	for (let i = 0z; i < nd.nchild; i += 1) {
 		n += put_str(scratch[n..], nodename(nd.children[i]));
@@ -681,7 +741,7 @@ fn listdir(id: size) []u8 = {
 export fn list_path(path: str) []u8 = {
 	const s = cur();
 	const fid = walkpath(s, *(&path: *[]u8));
-	if (fid == 0) {
+	if (fid == bfp::NOHANDLE) {
 		let empty: []u8 = [];
 		return empty;
 	};
@@ -769,8 +829,12 @@ fn do_read(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 };
 
 fn do_clunk(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
-	const fid = bfp::r_u32(r);
-	s.inuse[fid: size] = false;
+	const fid = bfp::r_u32(r): size;
+	if (fid >= MAXHANDLE) {
+		bad_handle(fid);
+		return;
+	};
+	s.inuse[fid] = false;
 };
 
 fn do_write(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
@@ -778,6 +842,10 @@ fn do_write(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 	const off = bfp::r_u64(r): size;
 	const data = bfp::r_bytes(r);
 	const id = hget(s, fid: size);
+	if (id >= MAXNODE) {
+		bfp::w_u32(w, 0);
+		return;
+	};
 	match (nodes[id].wdev) {
 	case null => void;
 	case let f: *fn(buf: []u8) size =>
@@ -943,6 +1011,12 @@ fn walkpath(s: *ns, path: []u8) u32 = {
 	for (let i = 0z; i <= len(path); i += 1) {
 		if (i == len(path) || path[i] == ('/': u8)) {
 			if (i > start) {
+				// Every step takes a fresh handle, so a deep path can run the
+				// table out.
+				if (nextfid >= MAXHANDLE) {
+					bad_handle(nextfid: size);
+					return bfp::NOHANDLE;
+				};
 				const name = path[start..i];
 				if (!walk1(s, fid, nextfid, name)) {
 					return bfp::NOHANDLE;
