@@ -27,9 +27,9 @@ CFLAGS = [
     "-fno-pie",
     "-fno-stack-protector",
     "-mno-red-zone",
-    "-mno-mmx",
-    "-mno-sse",
-    "-mno-sse2",
+    # x87 is not usable here: only the SSE registers survive a switch, and a
+    # long double computed through the x87 stack comes back truncated.
+    "-mfpmath=sse",
     "-mcmodel=small",
     "-fno-asynchronous-unwind-tables",
     "-fno-unwind-tables",

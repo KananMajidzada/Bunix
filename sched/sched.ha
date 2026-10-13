@@ -19,13 +19,42 @@ export type thread = struct {
 	space: uintptr,
 	heap: uintptr,
 	heap_end: uintptr,
+	fpu: uintptr,
 	alive: bool,
+};
+
+// Where the FPU and SSE state of each thread is parked across a switch. The
+// x86-64 syscall convention returns doubles in the SSE registers, so a ported
+// compiler needs them across every switch.
+def FPU_SZ: size = 512;
+let fpuareas: [MAXTHREADS][FPU_SZ]u8 = [[0...], [0...], [0...], [0...],
+	[0...], [0...], [0...], [0...]];
+let fpuready: [MAXTHREADS]bool = [false...];
+
+// Turns on the FPU and SSE for the whole machine and gives this thread a clean
+// set of registers. CR0.EM must be clear or SSE raises #UD, CR0.TS must be
+// clear or every x87 instruction raises #NM, and CR4 has to say that the OS
+// handles SSE and the legacy area.
+export fn fpu_init() void = {
+	const c0 = arch::read_cr0();
+	arch::write_cr0((c0 & ~((1 << 2) | (1 << 3))): uintptr);
+	const c4 = arch::read_cr4();
+	arch::write_cr4((c4 | (1 << 9) | (1 << 10)): uintptr);
+
+	arch::fpu_init(thread_fpu(0));
+	fpuready[0] = true;
+};
+
+fn thread_fpu(i: size) uintptr = {
+	// fxsave wants 16-byte alignment; the array gives us more than that.
+	return &fpuareas[i][0]: uintptr;
 };
 
 let threads: [MAXTHREADS]thread = [thread {
 	id = 0, stack = 0, kernel = 0, frame = 0,
-	space = 0, heap = 0, heap_end = 0, alive = false,
+	space = 0, heap = 0, heap_end = 0, fpu = 0, alive = false,
 }...];
+
 let nthreads: size = 0;
 let current: size = 0;
 
@@ -60,7 +89,8 @@ fn free_user(id: size) void = {
 export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
-		space = 0, heap = 0, heap_end = 0, alive = true,
+		space = 0, heap = 0, heap_end = 0,
+		fpu = thread_fpu(0), alive = true,
 	};
 	nthreads = 1;
 	current = 0;
@@ -115,6 +145,13 @@ fn free_slot() size = {
 };
 
 fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
+	// A thread that has never run has no registers worth keeping, so it gets
+	// a cleared area rather than whatever the last user of the slot left.
+	const save = thread_fpu(id);
+	for (let i = 0z; i < FPU_SZ; i += 1) {
+		*((save + (i: uintptr)): *u8) = 0;
+	};
+	arch::fpu_init(save);
 	threads[id] = thread {
 		id = id: u64,
 		stack = stack,
@@ -123,8 +160,10 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		space = space,
 		heap = 0,
 		heap_end = 0,
+		fpu = save,
 		alive = true,
 	};
+	fpuready[id] = true;
 };
 
 export fn spawn(entry: *fn(arg: uintptr) void, arg: uintptr) bool = {
@@ -208,12 +247,22 @@ export fn user_alloc(pages: u64) uintptr = {
 };
 
 fn pick_next() uintptr = {
+	// Park the outgoing thread's FPU and SSE registers before touching the
+	// incoming one's, so the two never share an area.
+	if (fpuready[current]) {
+		arch::fpu_save(threads[current].fpu);
+	};
+	let next = current;
 	for (let i = 1z; i <= nthreads; i += 1) {
 		const j = (current + i) % nthreads;
 		if (threads[j].alive) {
-			current = j;
+			next = j;
 			break;
 		};
+	};
+	current = next;
+	if (fpuready[current]) {
+		arch::fpu_load(threads[current].fpu);
 	};
 	if (threads[current].kernel != 0) {
 		arch::set_rsp0(threads[current].kernel);

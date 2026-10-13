@@ -141,6 +141,46 @@ arch.write_cr3:
 	movq %rdi, %cr3
 	ret
 
+.global arch.read_cr0
+arch.read_cr0:
+	movq %cr0, %rax
+	ret
+
+.global arch.write_cr0
+arch.write_cr0:
+	movq %rdi, %cr0
+	ret
+
+.global arch.read_cr4
+arch.read_cr4:
+	movq %cr4, %rax
+	ret
+
+.global arch.write_cr4
+arch.write_cr4:
+	movq %rdi, %cr4
+	ret
+
+# Puts the FPU and SSE into a known state. fxrstor leaves the registers at
+# whatever the last fxsave recorded, so the image is set up first and the
+# control words are cleared, which also sets the x87 tag word.
+.global arch.fpu_init
+arch.fpu_init:
+	fninit
+	fxsave (%rdi)
+	fxrstor (%rdi)
+	ret
+
+.global arch.fpu_save
+arch.fpu_save:
+	fxsave (%rdi)
+	ret
+
+.global arch.fpu_load
+arch.fpu_load:
+	fxrstor (%rdi)
+	ret
+
 .global arch.invlpg
 arch.invlpg:
 	invlpg (%rdi)

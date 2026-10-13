@@ -76,6 +76,74 @@ static void sink_str(sink_t *s, const char *p, int n) {
     for (int i = 0; i < n; i++) sink_put(s, p[i]);
 }
 
+// Floating point. The target has no host printf to lean on, so the digits are
+// worked out here: long double keeps the integer part away from the rounding
+// that a double would apply above 2^53.
+static void emit_double(sink_t *s, double v, int width, int prec, int left,
+                        int zero, int plus, int space, int alt, int upper) {
+    if (prec < 0) prec = 6;
+
+    // NaN and the infinities have no digits to lay out.
+    if (v != v) {
+        sink_str(s, upper ? "NAN" : "nan", 3);
+        return;
+    }
+
+    int neg = 0;
+    if (v < 0.0 || (v == 0.0 && 1.0 / v < 0.0)) {
+        neg = 1;
+        v = -v;
+    }
+    if (v > 1.7976931348623157e308) {
+        const char *w = upper ? "INF" : "inf";
+        if (neg) sink_put(s, '-');
+        sink_str(s, w, 3);
+        return;
+    }
+
+    char body[512];
+    int n = 0;
+
+    double ip = (double)(long long)v;
+    double fp = v - ip;
+    unsigned long long whole = (unsigned long long)ip;
+
+    char tmp[24];
+    int wn = 0;
+    if (whole == 0) {
+        tmp[wn++] = '0';
+    } else {
+        while (whole) {
+            tmp[wn++] = (char)('0' + (unsigned)(whole % 10));
+            whole /= 10;
+        }
+    }
+    for (int i = wn - 1; i >= 0; i--) body[n++] = tmp[i];
+
+    if (prec > 0 || alt) {
+        body[n++] = '.';
+        for (int k = 0; k < prec; k++) {
+            fp *= 10.0;
+            unsigned d = (unsigned)fp;
+            if (d > 9) d = 9;
+            body[n++] = (char)('0' + d);
+            fp -= (double)d;
+        }
+    }
+
+    int len = n + neg + ((plus || space) ? 1 : 0);
+    int pad = width - len;
+    if (pad < 0) pad = 0;
+
+    if (!left && !zero) sink_repeat(s, ' ', pad);
+    if (neg) sink_put(s, '-');
+    else if (plus) sink_put(s, '+');
+    else if (space) sink_put(s, ' ');
+    if (!left && zero) sink_repeat(s, '0', pad);
+    sink_str(s, body, n);
+    if (left) sink_repeat(s, ' ', pad);
+}
+
 // Number formatting. Length modifiers are read off the flag word instead of
 // being re-scanned, so "%lld" and "%zd" both land here with the right width.
 static void emit_num(sink_t *s, uint64_t v, int base, int upper, int neg,
@@ -237,6 +305,20 @@ static int emit(sink_t *s, const char *fmt, va_list ap) {
                 if (alt && base == 16 && v) sink_put(s, *p == 'X' ? '0' : '0');
                 emit_num(s, v, (int)base, *p == 'X', 0, width, zero, left, 0, 0);
             }
+            break;
+        }
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': {
+            double v = va_arg(ap, double);
+            emit_double(s, v, width, prec, left, zero, plus, space, alt,
+                        (*p == 'F' || *p == 'E' || *p == 'G'));
+            break;
+        }
+        case 'r': {
+            // Not C: the raw bits of a double, for checking the varargs path.
+            double v = va_arg(ap, double);
+            uint64_t u;
+            __builtin_memcpy(&u, &v, sizeof(u));
+            emit_num(s, u, 16, 0, 0, 0, 1, 0, 0, 0);
             break;
         }
         case 'p': {

@@ -64,7 +64,7 @@ build/prog_%.bin: build/elf_%
 # unset %fs), and no SSE, since we do not hand the process an FPU state.
 C_RT_DIR = userland/rt
 C_RT_CFLAGS = -ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
-	-fno-stack-protector -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -O2
+	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2
 C_RT_SRCS = crt0.S cstart.c heap.c string.c stdio.c posix.c ctype.c
 # Every object depends on the headers. They define the syscall ABI, so an
 # object left behind from an older header silently keeps the old calling
@@ -85,12 +85,15 @@ $(C_RT_DIR)/libc.a: $(C_RT_OBJS)
 
 # C programs: bcc compiles and links against the runtime above, producing a real
 # ELF at 0x400000 whose __image_end covers .bss as well as text and data.
-build/elf_test_c: tools/bcc/test.c $(C_RT_DIR)/libc.a tools/bcc/bcc
+define C_PROG_RULE
+build/elf_$(1): tools/bcc/$(1).c $(C_RT_DIR)/libc.a tools/bcc/bcc
 	@mkdir -p build
-	./tools/bcc/bcc -o $@ $<
+	./tools/bcc/bcc -o $$@ $$<
 
-build/prog_test_c.bin: build/elf_test_c
-	$(OBJCOPY) -O binary $< $@
+build/prog_$(1).bin: build/elf_$(1)
+	$(OBJCOPY) -O binary $$< $$@
+endef
+$(foreach p,$(C_PROGS),$(eval $(call C_PROG_RULE,$(p))))
 
 # Fold the program images into the kernel: their bytes end to end in one blob,
 # with a table naming each one's offset and size.

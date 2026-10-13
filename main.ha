@@ -102,6 +102,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	arch::timer_init();
 	arch::pic_unmask(0);
 	arch::tss_init();
+	sched::fpu_init();
 
 	console::println("");
 	console::println("starting user init.");

@@ -20,4 +20,14 @@ export fn store64(dst: uintptr, word: u64, count: size) void;
 export fn ltr(sel: u16) void;
 export fn read_cr3() uintptr;
 export fn write_cr3(space: uintptr) void;
+export fn read_cr0() uintptr;
+export fn write_cr0(v: uintptr) void;
+export fn read_cr4() uintptr;
+export fn write_cr4(v: uintptr) void;
+
+// The FPU and SSE registers, kept per thread so a switch does not lose them.
+// The area is 512 bytes and must be 16-byte aligned.
+export fn fpu_init(save: uintptr) void;
+export fn fpu_save(save: uintptr) void;
+export fn fpu_load(save: uintptr) void;
 export fn invlpg(addr: uintptr) void;
