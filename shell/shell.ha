@@ -55,7 +55,7 @@ fn readline(buf: []u8) size = {
 
 fn exec(mem_mib: u64, line: []u8) void = {
 	if (eq(line, "help")) {
-		console::println("commands: help, version, echo, clear, ls, cat, write, mkdir, touch, rm, mem, frames, uptime, bfp, heap, spawn, threads, user [path], multi, sh, fault, halt");
+		console::println("commands: help, version, echo, clear, ls, cat, write, mkdir, touch, rm, mem, frames, uptime, files, heap, spawn, threads, user [path], multi, sh, fault, halt");
 	} else if (eq(line, "version")) {
 		sys::banner();
 		console::print(sys::NAME);
@@ -80,8 +80,8 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		touch_cmd(*(&line[6..]: *str));
 	} else if (prefix(line, "rm ")) {
 		rm_cmd(*(&line[3..]: *str));
-	} else if (eq(line, "bfp")) {
-		bfp_demo();
+	} else if (eq(line, "files")) {
+		files_demo();
 	} else if (eq(line, "heap")) {
 		heap_demo();
 	} else if (eq(line, "spawn")) {
@@ -191,7 +191,7 @@ fn rm_cmd(path: str) void = {
 	};
 };
 
-fn bfp_demo() void = {
+fn files_demo() void = {
 	console::print("ls /:\n");
 	console::write(fs::cat("/"));
 	console::print("cat /proc/version: ");

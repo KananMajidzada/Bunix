@@ -21,7 +21,6 @@ export def SPAWN: u64 = 11;
 export def ALIVE: u64 = 12;
 export def FRESH: u64 = 13;
 export def SPAWN_SHARED: u64 = 14;
-export def APPENDFILE: u64 = 15;
 export def STAT: u64 = 16;
 export def SCREEN: u64 = 17;
 
