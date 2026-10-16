@@ -1,7 +1,7 @@
 # Bunix
 
 An operating system written in Hare. It comes with a C compiler and a text
-editor, and both of them run inside Bunix.
+editor, and both of them run inside Bunix kernel/os.
 
 ![boot](doc/boot.png)
 
@@ -20,7 +20,7 @@ tcc is part of the system. Write some C, compile it, run it, without leaving.
 	hello from Bunix
 
 There is also `mei`, an editor that draws straight onto the console. Arrows,
-Home, End, Ctrl-S to save, Ctrl-X to save and quit.
+Home, End, Ctrl-S to save, Ctrl-X to save and quit.I tryed to keep it simple as i can for now. 
 
 ![editor](doc/editor.png)
 
