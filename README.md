@@ -5,8 +5,7 @@ editor, and both of them run inside Bunix.
 
 ![boot](doc/boot.png)
 
-It boots into a small window manager. Every terminal has a shell of its own, so
-you can keep a few going at once.
+It boots into a small window manager Kit.
 
 ![windows](doc/windows.png)
 
