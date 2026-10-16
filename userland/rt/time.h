@@ -4,6 +4,8 @@
 // /proc/uptime, so that decimal string is the only clock there is, and every
 // time value here is seconds since boot.
 
+// time.h - clocks and calendar conversion.
+
 #ifndef BUNIX_TIME_H
 #define BUNIX_TIME_H
 
@@ -12,6 +14,8 @@
 
 typedef long clock_t;
 typedef long suseconds_t;
+
+#include <sys/time.h>
 
 #define CLOCKS_PER_SEC 100
 
@@ -23,10 +27,6 @@ struct tm {
     const char *tm_zone;
 };
 
-struct timeval {
-    time_t tv_sec;
-    suseconds_t tv_usec;
-};
 
 struct timespec {
     time_t tv_sec;
@@ -34,7 +34,7 @@ struct timespec {
 };
 
 time_t time(time_t *t);
-int gettimeofday(struct timeval *tv, void *tz);
+
 clock_t clock(void);
 struct tm *gmtime(const time_t *t);
 struct tm *localtime(const time_t *t);
