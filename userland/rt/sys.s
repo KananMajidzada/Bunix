@@ -30,6 +30,12 @@ rt.sys_writefile:
 	int $0x80
 	ret
 
+.global rt.sys_appendfile
+rt.sys_appendfile:
+	movq $15, %rax
+	int $0x80
+	ret
+
 .global rt.sys_readchr
 rt.sys_readchr:
 	movq $5, %rax
@@ -87,6 +93,18 @@ rt.sys_alive:
 .global rt.sys_fresh
 rt.sys_fresh:
 	movq $13, %rax
+	int $0x80
+	ret
+
+.global rt.sys_stat
+rt.sys_stat:
+	movq $16, %rax
+	int $0x80
+	ret
+
+.global rt.sys_screen
+rt.sys_screen:
+	movq $17, %rax
 	int $0x80
 	ret
 

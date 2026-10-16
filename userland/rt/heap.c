@@ -51,15 +51,6 @@ void *malloc(size_t n) {
             return (void *)(b + 1);
         }
         block_t *next = b->next;
-        if (b->sz >= n + sizeof(block_t) + ALIGN) {
-            // Cut the tail off as a new free block.
-            block_t *rest = (block_t *)((char *)b + sizeof(block_t) + align_up(n));
-            rest->sz = b->sz - align_up(n) - sizeof(block_t);
-            rest->next = b->next;
-            *prev = rest;
-            b->sz = align_up(n);
-            return (void *)(b + 1);
-        }
         prev = &b->next;
         b = next;
     }

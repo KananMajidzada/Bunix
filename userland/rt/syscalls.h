@@ -31,6 +31,8 @@ typedef long ssize_t;
 #define SYS_ALIVE       12
 #define SYS_FRESH       13
 #define SYS_SPAWN_SHARED 14
+#define SYS_STAT        16
+#define SYS_SCREEN      17
 
 static inline uint64_t syscall0(uint64_t n) {
     uint64_t ret;
@@ -87,6 +89,28 @@ static inline ssize_t bunix_readfile(const char *path, void *buf, size_t count) 
 static inline ssize_t bunix_writefile(const char *path, const void *buf, size_t count) {
     uint64_t n = path_len(path);
     return (ssize_t)syscall4(SYS_WRITEFILE, (uint64_t)path, n, (uint64_t)buf, count);
+}
+
+static inline ssize_t bunix_appendfile(const char *path, const void *buf, size_t count) {
+    uint64_t n = path_len(path);
+    return (ssize_t)syscall4(15, (uint64_t)path, n, (uint64_t)buf, count);
+}
+
+// Size and type of a path without reading it: mode 1 means a directory.
+struct bunix_stat {
+    uint64_t size;
+    uint32_t mode;
+};
+
+// The console size, so a program can fit itself to the screen.
+static inline int bunix_screen(uint32_t *rows, uint32_t *cols) {
+    return (int)syscall2(SYS_SCREEN, (uint64_t)rows, (uint64_t)cols);
+}
+
+static inline int bunix_stat(const char *path, struct bunix_stat *st) {
+    uint64_t n = path_len(path);
+    return (int)syscall4(SYS_STAT, (uint64_t)path, n,
+                         (uint64_t)&st->size, (uint64_t)&st->mode);
 }
 
 static inline int bunix_readdir(const char *path, void *buf, size_t count) {

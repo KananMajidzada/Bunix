@@ -1,4 +1,5 @@
 use arch;
+use kit;
 use mem;
 use paging;
 
@@ -20,13 +21,24 @@ export type thread = struct {
 	heap: uintptr,
 	heap_end: uintptr,
 	fpu: uintptr,
+	// The terminal window this thread's output belongs to. A thread keeps to
+	// the window it was started in, so a program left running in one window
+	// does not paint over another one that is merely being looked at.
+	win: size,
 	alive: bool,
 };
 
 // Where the FPU and SSE state of each thread is parked across a switch. The
 // x86-64 syscall convention returns doubles in the SSE registers, so a ported
 // compiler needs them across every switch.
-def FPU_SZ: size = 512;
+//
+// fxsave refuses a buffer that is not aligned, raising a general protection
+// fault with no faulting address. Where an array lands in .bss depends on
+// whatever else happens to be there, so the address cannot be relied on to be
+// aligned and is rounded up instead. The state is 512 bytes and the worst
+// rounding gives up 63, hence the roomier slot.
+def FPU_SZ: size = 1024;
+def FPU_ALIGN: uintptr = 64;
 let fpuareas: [MAXTHREADS][FPU_SZ]u8 = [[0...], [0...], [0...], [0...],
 	[0...], [0...], [0...], [0...]];
 let fpuready: [MAXTHREADS]bool = [false...];
@@ -46,13 +58,13 @@ export fn fpu_init() void = {
 };
 
 fn thread_fpu(i: size) uintptr = {
-	// fxsave wants 16-byte alignment; the array gives us more than that.
-	return &fpuareas[i][0]: uintptr;
+	const raw = &fpuareas[i][0]: uintptr;
+	return (raw + (FPU_ALIGN - 1)) & ~(FPU_ALIGN - 1);
 };
 
 let threads: [MAXTHREADS]thread = [thread {
 	id = 0, stack = 0, kernel = 0, frame = 0,
-	space = 0, heap = 0, heap_end = 0, fpu = 0, alive = false,
+	space = 0, heap = 0, heap_end = 0, fpu = 0, win = 0, alive = false,
 }...];
 
 let nthreads: size = 0;
@@ -90,10 +102,129 @@ export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
 		space = 0, heap = 0, heap_end = 0,
-		fpu = thread_fpu(0), alive = true,
+		fpu = thread_fpu(0), win = 0, alive = true,
 	};
 	nthreads = 1;
 	current = 0;
+};
+
+// Points a thread that has just been created at a particular window, for a
+// shell started to serve a newly opened terminal.
+export fn bind_win(id: size, wi: size) void = {
+	if (id == NOID || id >= MAXTHREADS) {
+		return;
+	};
+	// The thread was entered in the window of whoever started it, which is
+	// not the window it is being sent to. Leaving the foreground record
+	// pointing at it would make that window hand its keystrokes to a
+	// process belonging to another one.
+	const old = threads[id].win;
+	threads[id].win = wi;
+	if (old < MAXWIN && win_fg[old] == id) {
+		win_fg[old] = MAXWIN;
+	};
+	if (wi < MAXWIN) {
+		win_fg[wi] = id;
+	};
+};
+
+// Keystrokes waiting for each thread. Every terminal window has a shell of its
+// own, and they all read the same keyboard, so a byte has to be filed against
+// the thread that is meant to receive it rather than handed to whichever one the
+// scheduler happens to be running.
+def INQ: size = 64;
+let inq: [MAXTHREADS * INQ]u8 = [0...];
+let inhead: [MAXTHREADS]size = [0...];
+let intail: [MAXTHREADS]size = [0...];
+let incount: [MAXTHREADS]size = [0...];
+
+// The thread a window is showing: the one most recently started in it and still
+// running. A shell and the program it started share a window, and the program
+// is the one that must read the keyboard, exactly as a terminal hands input to
+// the foreground job rather than to the shell behind it. NONE means the window
+// has no job of its own, and the shell behind it takes the input.
+def MAXWIN: size = 6;
+let win_fg: [MAXWIN]size = [MAXWIN...];
+
+// The shell behind each window. A window's foreground job may come and go, and
+// when it does the keystrokes have to go back to the shell that owns the
+// window rather than to whichever thread happens to come first: the kernel's
+// own first process is a monitor that never reads the keyboard, and it is the
+// first live thread in the window the boot shell runs in.
+let win_shell: [MAXWIN]size = [MAXWIN...];
+
+// The window the next thread started belongs to. MAXWIN means "the window of
+// whoever is starting it", which is right for a program a shell runs.
+let spawn_win: size = MAXWIN;
+
+// Names the window a process about to be started should belong to.
+export fn set_spawn_win(wi: size) void = {
+	spawn_win = wi;
+};
+
+fn input_thread() size = {
+	const wi = kit::focus_win();
+	if (wi < MAXWIN) {
+		const fg = win_fg[wi];
+		if (fg != MAXWIN && fg < MAXTHREADS && threads[fg].alive
+				&& threads[fg].win == wi) {
+			return fg;
+		};
+		const sh = win_shell[wi];
+		if (sh != MAXWIN && sh < MAXTHREADS && threads[sh].alive
+				&& threads[sh].win == wi) {
+			return sh;
+		};
+		for (let i = 0z; i < nthreads; i += 1) {
+			if (threads[i].alive && threads[i].win == wi) {
+				return i;
+			};
+		};
+	};
+	return current;
+};
+
+// Records which shell owns a window, so a window with nothing running in it
+// still has somewhere to put keystrokes.
+export fn bind_shell(id: size, wi: size) void = {
+	if (wi < MAXWIN && id != NOID && id < MAXTHREADS) {
+		win_shell[wi] = id;
+	};
+};
+
+fn push_input(t: size, b: u8) void = {
+	if (t >= MAXTHREADS || incount[t] == INQ) {
+		return;
+	};
+	inq[t * INQ + intail[t]] = b;
+	intail[t] = (intail[t] + 1) % INQ;
+	incount[t] += 1;
+};
+
+fn pop_input() u8 = {
+	if (incount[current] == 0) {
+		return 0;
+	};
+	const b = inq[current * INQ + inhead[current]];
+	inhead[current] = (inhead[current] + 1) % INQ;
+	incount[current] -= 1;
+	return b;
+};
+
+// Files a byte just read from the keyboard against the focused window's thread
+// and returns whatever is waiting for the caller.
+export fn deliver(b: u8) u8 = {
+	if (b != 0) {
+		push_input(input_thread(), b);
+	};
+	return pop_input();
+};
+
+// Drops anything a thread had not read before its slot was reused.
+fn clear_input(t: size) void = {
+	inhead[t] = 0;
+	intail[t] = 0;
+	incount[t] = 0;
 };
 
 export fn count() size = nthreads;
@@ -113,7 +244,11 @@ export fn running() u64 = threads[current].id;
 export fn alive(id: size) bool = id < nthreads && threads[id].alive;
 
 export fn retire() void = {
+	const wi = threads[current].win;
 	threads[current].alive = false;
+	if (wi < MAXWIN && win_fg[wi] == current) {
+		win_fg[wi] = MAXWIN;
+	};
 	free_user(current);
 	call_reap();
 };
@@ -147,11 +282,18 @@ fn free_slot() size = {
 fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 	// A thread that has never run has no registers worth keeping, so it gets
 	// a cleared area rather than whatever the last user of the slot left.
+	clear_input(id);
 	const save = thread_fpu(id);
 	for (let i = 0z; i < FPU_SZ; i += 1) {
 		*((save + (i: uintptr)): *u8) = 0;
 	};
 	arch::fpu_init(save);
+	// A thread started on behalf of a particular terminal belongs to that
+	// terminal, not to the window of whichever process happened to ask for
+	// it. Setting this before starting the process matters: the very first
+	// thing a new shell prints is its banner, and it must not land in the
+	// window it was opened over.
+	const w = if (spawn_win < MAXWIN) spawn_win else threads[current].win;
 	threads[id] = thread {
 		id = id: u64,
 		stack = stack,
@@ -161,8 +303,13 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		heap = 0,
 		heap_end = 0,
 		fpu = save,
+		win = w,
 		alive = true,
 	};
+	if (w < MAXWIN) {
+		win_fg[w] = id;
+	};
+	spawn_win = MAXWIN;
 	fpuready[id] = true;
 };
 
@@ -261,6 +408,8 @@ fn pick_next() uintptr = {
 		};
 	};
 	current = next;
+	// Output follows the running thread into its own window.
+	kit::set_out_win(threads[current].win);
 	if (fpuready[current]) {
 		arch::fpu_load(threads[current].fpu);
 	};

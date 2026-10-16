@@ -83,7 +83,15 @@ export fn open(p: str, flags: int) int = {
 	if (i < 0) {
 		return -1;
 	};
-	const mem = rt::malloc(BUFCAP);
+	// Sized from the file itself. A fixed cap silently truncated anything
+	// bigger, which made wc under-report and grep miss the tail of a file.
+	let want = rt::filesize(p);
+	if (want < 1) {
+		want = BUFCAP;
+	} else {
+		want += 1;
+	};
+	const mem = rt::malloc(want);
 	const b = match (mem) {
 	case null =>
 		return -1;
@@ -104,7 +112,7 @@ export fn open(p: str, flags: int) int = {
 		return i;
 	};
 	wronly[j] = false;
-	length[j] = rt::readfile(p, as_slice(b, BUFCAP));
+	length[j] = rt::readfile(p, as_slice(b, want));
 	return i;
 };
 

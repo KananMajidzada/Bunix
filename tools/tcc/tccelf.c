@@ -1080,7 +1080,12 @@ ST_FUNC void build_got_entries(TCCState *s1)
 
 #ifdef TCC_TARGET_X86_64
             if ((type == R_X86_64_PLT32 || type == R_X86_64_PC32) &&
-                (ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||
+                /* A static executable has nothing to interpose and nobody to
+                   resolve its GOT at load time, so every call binds directly.
+                   Otherwise tcc routes calls through a PLT whose GOT slot is
+                   never filled, and the jump lands on whatever the slot held. */
+                (s1->static_link
+                 || ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||
 		 ELFW(ST_BIND)(sym->st_info) == STB_LOCAL)) {
                 rel->r_info = ELFW(R_INFO)(sym_index, R_X86_64_PC32);
                 continue;
@@ -2215,9 +2220,15 @@ static int elf_output_file(TCCState *s1, const char *filename)
 	tidy_section_headers(s1, sec_order);
 
         /* Perform relocation to GOT or PLT entries */
-        if (file_type == TCC_OUTPUT_EXE && s1->static_link)
+        if (file_type == TCC_OUTPUT_EXE && s1->static_link) {
+            /* A static executable still emits PLT stubs, and their
+               RIP-relative displacements have to be fixed up against the final
+               GOT address just as a dynamic one does. Without this the stubs
+               keep raw offsets within the GOT and jump into the middle of the
+               PLT table instead of reaching their target. */
+            relocate_plt(s1);
             fill_got(s1);
-        else if (s1->got)
+        } else if (s1->got)
             fill_local_got_entries(s1);
     }
 

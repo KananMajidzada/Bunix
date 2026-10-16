@@ -21,6 +21,9 @@ export def SPAWN: u64 = 11;
 export def ALIVE: u64 = 12;
 export def FRESH: u64 = 13;
 export def SPAWN_SHARED: u64 = 14;
+export def APPENDFILE: u64 = 15;
+export def STAT: u64 = 16;
+export def SCREEN: u64 = 17;
 
 type raw = struct {
 	data: *[*]u8,
@@ -41,18 +44,22 @@ fn asstr(ptr: uintptr, n: size) str = {
 	return *(&r: *str);
 };
 
+// The bytes a user called read with, viewed as a slice so the filesystem can
+// fill them in place. This is what keeps a read from being limited to some
+// fixed intermediate buffer.
+fn asbuf(ptr: uintptr, n: size) []u8 = {
+	let r = raw {
+		data = ptr: *[*]u8,
+		length = n,
+		capacity = n,
+	};
+	return *(&r: *[]u8);
+};
+
 fn readfile(regs: *arch::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
-	const data = fs::cat(path);
-	let n = len(data);
-	if (n > (regs.rcx: size)) {
-		n = regs.rcx: size;
-	};
-	for (let i = 0z; i < n; i += 1) {
-		const p = ((regs.rdx: uintptr) + (i: uintptr)): *u8;
-		*p = data[i];
-	};
-	return n: u64;
+	const dest = asbuf(regs.rdx: uintptr, regs.rcx: size);
+	return fs::read(path, dest): u64;
 };
 
 fn writefile(regs: *arch::registers) u64 = {
@@ -70,6 +77,19 @@ fn createpath(regs: *arch::registers) u64 = {
 fn removepath(regs: *arch::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return if (fs::remove(path)) 1 else 0;
+};
+
+// Fills *(u64*)rdx with the size and *(u32*)rcx with 1 for a directory or 0 for
+// a file. Returns 1 when the path exists, 0 when it does not.
+fn statpath(regs: *arch::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	let st = fs::filestat { length = 0, isdir = false };
+	if (!fs::stat(path, &st)) {
+		return 0;
+	};
+	*((regs.rdx: uintptr): *u64) = st.length;
+	*((regs.rcx: uintptr): *u32) = if (st.isdir) 1 else 0;
+	return 1;
 };
 
 fn readdirpath(regs: *arch::registers) u64 = {
@@ -116,7 +136,10 @@ fn handle(regs: *arch::registers) uintptr = {
 		regs.rax = writefile(regs);
 		return regs: uintptr;
 	case READCHR =>
-		regs.rax = console::pollch(): u64;
+		// A keystroke goes to the shell behind the window that has the
+		// focus, so typing into a new terminal is not swallowed by a
+		// program still running in another one.
+		regs.rax = sched::deliver(console::pollch()): u64;
 		return regs: uintptr;
 	case YIELD =>
 		console::poll_mouse();
@@ -130,6 +153,15 @@ fn handle(regs: *arch::registers) uintptr = {
 		return regs: uintptr;
 	case READDIR =>
 		regs.rax = readdirpath(regs);
+		return regs: uintptr;
+	case STAT =>
+		regs.rax = statpath(regs);
+		return regs: uintptr;
+	case SCREEN =>
+		// The console size, so a program can fit itself to the screen.
+		*((regs.rdi: uintptr): *u32) = console::screen_rows(): u32;
+		*((regs.rsi: uintptr): *u32) = console::screen_cols(): u32;
+		regs.rax = 1;
 		return regs: uintptr;
 	case HALT =>
 		rt::halt();

@@ -9,7 +9,7 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c tcc
+PROGS = hello wc grep cp cc test_c tcc mei
 
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))
@@ -23,7 +23,8 @@ all: bunix.bin
 
 # The kernel is a freestanding Hare program. HAREPATH is pointed at the tree
 # itself so the build only sees our runtime and modules.
-bunix: user/blob.ha user/progs.ha user/progs.s user/hdrs.ha user/src.ha $(SRCS)
+bunix: user/blob.ha user/progs.ha user/progs.s user/hdrs.ha user/src.ha \
+       user/crt.ha user/libc.ha $(SRCS)
 	HAREPATH=. $(HARE) build -F -a$(ARCH) -o $@
 
 # QEMU's built-in Multiboot loader only accepts 32-bit ELF, so hand it a flat
@@ -51,9 +52,23 @@ user/blob.ha: build/prog.bin
 	   od -An -tu1 -v build/prog.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
 	   printf '];\nexport const entry: u64 = 0x%s;\nexport const image_end: u64 = 0x%s;\n' "$$e" "$$x"; } > $@
 
-# The compiler's own headers, served from /usr/include inside the filesystem.
-user/hdrs.ha: $(wildcard $(TCC_DIR)/include/*.h) tools/embed.py
-	python3 tools/embed.py $(TCC_DIR)/include $@ header
+# /usr/include holds the compiler's own headers and the C library's headers
+# together, so a program written inside Bunix can say #include <stdio.h> or
+# <sys/stat.h> and have it resolve. The two sets overlap (stdarg.h, stddef.h,
+# float.h, stdbool.h): the compiler's copies win, because they match what the
+# compiler itself understands. userland/include adds headers that exist only
+# for the target.
+HDRS_STAGE = build/headers
+user/hdrs.ha: $(wildcard $(TCC_DIR)/include/*.h) $(wildcard userland/rt/*.h) \
+              $(wildcard userland/rt/sys/*.h) $(wildcard userland/include/*.h) \
+              tools/embed.py
+	@rm -rf $(HDRS_STAGE)
+	@mkdir -p $(HDRS_STAGE)/sys
+	@cp userland/rt/*.h $(HDRS_STAGE)/
+	@cp userland/rt/sys/*.h $(HDRS_STAGE)/sys/
+	@cp userland/include/*.h $(HDRS_STAGE)/
+	@cp $(TCC_DIR)/include/*.h $(HDRS_STAGE)/
+	python3 tools/embed.py $(HDRS_STAGE) $@ header
 
 user/src.ha: $(wildcard $(TCC_DIR)/examples/*.c) tools/embed.py
 	python3 tools/embed.py $(TCC_DIR)/examples $@ src
@@ -69,10 +84,13 @@ build/prog_%.bin: build/elf_%
 # The C runtime that cross-compiled programs link against. It is freestanding:
 # no host libc, no host stack protector (its canary read would fault on an
 # unset %fs), and no SSE, since we do not hand the process an FPU state.
+# Symbols are hidden: a static library has nothing to interpose, and hiding
+# them lets the compiler inside Bunix turn its calls into direct ones instead of
+# routing every one through a PLT that expects a dynamic linker to fill in.
 C_RT_DIR = userland/rt
 C_RT_CFLAGS = -ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
-	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2
-C_RT_SRCS = crt0.S cstart.c setjmp.S heap.c string.c stdio.c posix.c \
+	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2 -fvisibility=hidden
+C_RT_SRCS = crt0.S cstart.c setjmp.S heap.c string.c stdio.c posix.c initfini.c \
 	ctype.c math.c stdlib.c scan.c stubs.c
 # Every object depends on the headers. They define the syscall ABI, so an
 # object left behind from an older header silently keeps the old calling
@@ -91,6 +109,35 @@ build/rt/%.o: $(C_RT_DIR)/%.S $(C_RT_HDRS)
 $(C_RT_DIR)/libc.a: $(C_RT_OBJS)
 	$(AR) rcs $@ $(C_RT_OBJS)
 
+# The startup objects and the runtime library are folded into the kernel as byte
+# tables. They are generated from the build rather than carried in the tree, so
+# that a rebuilt libc can never be left shadowed by a stale copy of its own
+# bytes: the compiler inside Bunix was once reading an embedded archive that
+# silently trailed the real one.
+CRT_STAGE = build/crt
+RT_STAGE = build/lib
+
+build/crt/crt1.o: $(C_RT_DIR)/crt0.S tools/bcc/bcc
+	@mkdir -p $(CRT_STAGE)
+	./tools/bcc/bcc -c -o $@ $<
+
+build/crt/crti.o: $(C_RT_DIR)/crti.S
+	@mkdir -p $(CRT_STAGE)
+	$(CC) -c $< -o $@
+
+build/crt/crtn.o: $(C_RT_DIR)/crtn.S
+	@mkdir -p $(CRT_STAGE)
+	$(CC) -c $< -o $@
+
+user/crt.ha: build/crt/crt1.o build/crt/crti.o build/crt/crtn.o tools/embed.py
+	python3 tools/embed.py $(CRT_STAGE) $@ crt
+
+user/libc.ha: $(C_RT_DIR)/libc.a tools/embed.py
+	@rm -rf $(RT_STAGE)
+	@mkdir -p $(RT_STAGE)
+	cp $(C_RT_DIR)/libc.a $(RT_STAGE)/libc.a
+	python3 tools/embed.py $(RT_STAGE) $@ libc
+
 # C programs: bcc compiles and links against the runtime above, producing a real
 # ELF at 0x400000 whose __image_end covers .bss as well as text and data.
 define C_PROG_RULE
@@ -105,15 +152,18 @@ $(foreach p,$(C_PROGS),$(eval $(call C_PROG_RULE,$(p))))
 
 # tcc is a program with sources of its own. Upstream builds it as one
 # translation unit (ONE_SOURCE in its config.h), so a single bcc invocation is
-# all it takes. Its own headers come first, then the runtime's.
+# all it takes. Its own headers come first, then the runtime's. Every one of
+# its sources is a prerequisite: tcc.c #includes the rest, so a Makefile that
+# only watched tcc.c would keep a stale compiler after an edit anywhere else.
 TCC_DIR = tools/tcc
+TCC_SRCS = $(wildcard $(TCC_DIR)/*.c) $(wildcard $(TCC_DIR)/*.h)
 # The runtime's headers come first: bcc compiles tcc with the host
 # compiler, which has a correct va_list of its own.
 TCC_CFLAGS = -I$(C_RT_DIR) -I$(CURDIR)/$(TCC_DIR) -I$(CURDIR)/$(TCC_DIR)/include
 
-build/elf_tcc: $(TCC_DIR)/tcc.c $(C_RT_DIR)/libc.a tools/bcc/bcc
+build/elf_tcc: $(TCC_SRCS) $(C_RT_DIR)/libc.a tools/bcc/bcc
 	@mkdir -p build
-	./tools/bcc/bcc $(TCC_CFLAGS) -o $@ $<
+	./tools/bcc/bcc $(TCC_CFLAGS) -o $@ tools/tcc/tcc.c
 
 build/prog_tcc.bin: build/elf_tcc
 	$(OBJCOPY) -O binary $< $@

@@ -7,7 +7,7 @@ use rt;
 // on the right edge. Button 1 selects, moves, and resizes; buttons 2 and 3
 // raise a menu. Window changes repaint the whole desktop into the framebuffer
 // shadow, so moving or resizing never leaves a trail behind. Terminal output
-// is instead batched: writes mark the screen dirty and one frame is drawn when
+// is instead batched: writes mark the window dirty and one frame is drawn when
 // the loop next waits for input, so a command's output costs one repaint
 // rather than one per letter or line.
 
@@ -102,7 +102,33 @@ let menu_y = 0z;
 // Terminal writes only mark this; the frame is drawn once the waiting loop
 // next polls for input, so a burst of output costs one repaint instead of one
 // per character or per line.
-let dirty = false;
+// The window that has the focus. Keystrokes belong to it rather than to
+// whichever thread happened to be running when they arrived.
+export fn focus_win() size = return focus;
+
+// The window output is currently going to. A thread writes to the window it
+// was started in rather than to whichever one happens to have the focus, so a
+// program left running in one terminal does not paint over another. NONE means
+// there is no window to write to yet, and the focused window is used instead.
+let out_win: size = NONE;
+
+// The scheduler calls this on every thread switch.
+export fn set_out_win(wi: size) void = {
+	out_win = wi;
+};
+
+// The window a byte written now should land in.
+export fn out_target() size = {
+	if (out_win != NONE && out_win < MAXWIN && wins[out_win].used) {
+		return out_win;
+	};
+	return focus;
+};
+
+// Set to the window whose contents changed. Terminal output only ever affects
+// the window it was written to, so redrawing the desktop behind it for every
+// keystroke is what makes a full-screen program flicker.
+let dirty_win: size = NONE;
 
 // Set when a window is created after boot, so the shell knows to greet the new
 // terminal. Cleared by take_fresh once the prompt has been drawn.
@@ -303,9 +329,21 @@ fn draw_pointer() void = {
 	};
 };
 
+// Repaints one window into the shadow and presents only that rectangle. The
+// desktop and every other window are already correct in the shadow, so there is
+// nothing to redraw and nothing to copy.
+fn repaint_win(wi: size) void = {
+	if (wi == NONE || !wins[wi].used) {
+		return;
+	};
+	hover = hovered();
+	draw_window(wi);
+	fb::present_rect(wins[wi].wx, wins[wi].wy, wins[wi].ww, wins[wi].wh);
+};
+
 // Repaints the desktop into the shadow and presents one whole frame.
 fn repaint() void = {
-	dirty = false;
+	dirty_win = NONE;
 	hover = hovered();
 	fb::fill(0, 0, fb::width(), fb::height(), DESKTOP);
 	for (let i = 0z; i < nz; i += 1) {
@@ -415,6 +453,14 @@ fn blank(wi: size) void = {
 	};
 };
 
+// Set by the kernel. A terminal window is no use without something running in
+// it, so making one asks for a shell to be started there.
+export let new_win_hook: nullable *fn(wi: size) void = null;
+
+// True while begin() is making the very first window, which must not ask for a
+// shell because the kernel is already about to start one.
+let booting = true;
+
 fn new_window(x: size, y: size) void = {
 	let wi = NONE;
 	for (let i = 0z; i < MAXWIN; i += 1) {
@@ -444,6 +490,13 @@ fn new_window(x: size, y: size) void = {
 	nz += 1;
 	focus = wi;
 	fresh = true;
+	if (!booting) {
+		match (new_win_hook) {
+		case null => void;
+		case let f: *fn(wi: size) void =>
+			f(wi);
+		};
+	};
 };
 
 fn delete_window(wi: size) void = {
@@ -796,14 +849,168 @@ export fn mouse(dx: int, dy: int, btn: u8) void = {
 	repaint();
 };
 
+// An escape sequence arrives one byte at a time and only means something once it
+// has been put back together. A terminal window that understands CSI can be
+// drawn on directly, which is what a full-screen program such as an editor
+// needs: it moves the cursor and clears lines rather than scrolling.
+let csi_state: int = 0;		// 0 plain text, 1 saw ESC, 2 collecting a CSI
+let csi_param: [16]u8 = [0...];
+let csi_n: size = 0;
+
+fn csi_number(final: u8) void = {
+	const wi = out_target();
+	if (wi == NONE || !wins[wi].used) {
+		return;
+	};
+	let a = 0z;
+	let b = 0z;
+	let seen = 0;
+	for (let i = 0z; i < csi_n; i += 1) {
+		const c = csi_param[i];
+		if (c == (';': u8)) {
+			seen += 1;
+			continue;
+		};
+		if (seen == 0) {
+			a = a * 10 + (c - ('0': u8));
+		} else {
+			b = b * 10 + (c - ('0': u8));
+		};
+	};
+	if (final == ('H': u8) || final == ('f': u8)) {
+		// Cursor position, counted from one, and a missing number means one.
+		let r: size = if (a > 0) a - 1 else 0;
+		let c: size = if (b > 0) b - 1 else 0;
+		if (r >= HIST) {
+			r = HIST - 1;
+		};
+		if (c >= wins[wi].cols) {
+			c = wins[wi].cols - 1;
+		};
+		wins[wi].crow = r;
+		wins[wi].ccol = c;
+		if (wins[wi].crow + 1 > wins[wi].total) {
+			wins[wi].total = wins[wi].crow + 1;
+		};
+		follow(wi);
+	} else if (final == ('J': u8)) {
+		if (a == 2) {
+			clear_window(wi);
+		} else {
+			erase_display(wi, wins[wi].crow, wins[wi].ccol);
+		};
+	} else if (final == ('K': u8)) {
+		erase_display(wi, wins[wi].crow, wins[wi].ccol);
+	} else if (final == ('A': u8)) {
+		if (wins[wi].crow > 0) {
+			wins[wi].crow -= 1;
+		};
+	} else if (final == ('B': u8)) {
+		if (wins[wi].crow + 1 < HIST) {
+			wins[wi].crow += 1;
+		};
+	} else if (final == ('C': u8)) {
+		if (wins[wi].ccol + 1 < wins[wi].cols) {
+			wins[wi].ccol += 1;
+		};
+	} else if (final == ('D': u8)) {
+		if (wins[wi].ccol > 0) {
+			wins[wi].ccol -= 1;
+		};
+	};
+};
+
+// Blanks a run of the window's text buffer.
+fn erase_range(wi: size, from: size, to: size) void = {
+	if (to > HIST * MAXCOLS) {
+		to = HIST * MAXCOLS;
+	};
+	for (let i = from; i < to; i += 1) {
+		bufs[i] = (' ': u8);
+	};
+};
+
+// Blanks from a position to the end of that line.
+fn erase_display(wi: size, li: size, col: size) void = {
+	if (li >= HIST) {
+		return;
+	};
+	erase_range(wi, at(wi, li, col), at(wi, li, wins[wi].cols));
+};
+
+fn clear_window(wi: size) void = {
+	blank(wi);
+	wins[wi].crow = 0;
+	wins[wi].ccol = 0;
+	wins[wi].top = 0;
+	wins[wi].total = 1;
+};
+
+// Draws one cell of a window into the shadow and pushes only that cell onto
+// the card. A character shows up the moment it is written, the way a terminal
+// shows it, without copying the whole screen for every letter.
+fn put_cell(wi: size, li: size, col: size, cursor: bool) void = {
+	if (li < wins[wi].top || li >= wins[wi].top + wins[wi].rows) {
+		return;
+	};
+	if (col >= wins[wi].cols) {
+		return;
+	};
+	const ch = bufs[at(wi, li, col)];
+	const x = wins[wi].wx + BORD + col * fb::CW;
+	const y = wins[wi].wy + TITLE + BORD + (li - wins[wi].top) * fb::CH;
+	if (cursor) {
+		fb::cell(x, y, ch, fb::WHITE, fb::BLACK);
+	} else {
+		fb::cell(x, y, ch, fb::BLACK, fb::WHITE);
+	};
+	fb::present_rect(x, y, fb::CW, fb::CH);
+};
+
+// Where the cursor block is currently painted, so it can be lifted off the
+// cell it was sitting on before the cursor moves.
+let cur_painted = false;
+let cur_li: size = 0;
+let cur_col: size = 0;
+
 export fn putc(ch: u8) void = {
 	if (!on) {
 		return;
 	};
-	const wi = focus;
+	const wi = out_target();
 	if (wi == NONE || !wins[wi].used) {
 		return;
 	};
+	if (csi_state == 1) {
+		csi_state = 0;
+		if (ch == ('[': u8)) {
+			csi_state = 2;
+			csi_n = 0;
+		};
+		return;
+	};
+	if (csi_state == 2) {
+		if ((ch >= ('0': u8) && ch <= ('9': u8)) || ch == (';': u8)) {
+			if (csi_n < len(csi_param)) {
+				csi_param[csi_n] = ch;
+				csi_n += 1;
+			};
+			return;
+		};
+		csi_state = 0;
+		csi_number(ch);
+		cur_painted = false;
+		dirty_win = wi;
+		return;
+	};
+	if (ch == 0x1B) {
+		csi_state = 1;
+		return;
+	};
+	const was_top = wins[wi].top;
+	let wrote = false;
+	let wli = 0z;
+	let wcl = 0z;
 	if (ch == ('\n': u8)) {
 		wins[wi].crow += 1;
 		wins[wi].ccol = 0;
@@ -820,7 +1027,10 @@ export fn putc(ch: u8) void = {
 			wins[wi].ccol = wins[wi].cols - 1;
 		};
 	} else {
-		bufs[at(wi, wins[wi].crow, wins[wi].ccol)] = ch;
+		wli = wins[wi].crow;
+		wcl = wins[wi].ccol;
+		bufs[at(wi, wli, wcl)] = ch;
+		wrote = true;
 		wins[wi].ccol += 1;
 		if (wins[wi].ccol >= wins[wi].cols) {
 			wins[wi].ccol = 0;
@@ -837,13 +1047,52 @@ export fn putc(ch: u8) void = {
 		};
 	};
 	follow(wi);
-	dirty = true;
+	if (wins[wi].top != was_top) {
+		// The window scrolled, so everything in it moved: redraw it whole.
+		cur_painted = false;
+		dirty_win = wi;
+		return;
+	};
+	// Lift the cursor off the cell it was painted on, show the character, and
+	// put the cursor where it now belongs.
+	if (cur_painted) {
+		put_cell(wi, cur_li, cur_col, false);
+	};
+	if (wrote) {
+		put_cell(wi, wli, wcl, false);
+	};
+	cur_li = wins[wi].crow;
+	cur_col = wins[wi].ccol;
+	put_cell(wi, cur_li, cur_col, true);
+	cur_painted = true;
 };
 
-// Draws any terminal output written since the last frame.
+// The size of the focused window, so a full-screen program can lay itself out
+// to the screen Bunix actually has. The window is smaller than the display
+// behind it, and reporting the display's size instead would push the bottom of
+// the program off the bottom of the window.
+export fn screen_rows() size = {
+	if (!on || focus == NONE || !wins[focus].used) {
+		return 0;
+	};
+	return wins[focus].rows;
+};
+
+export fn screen_cols() size = {
+	if (!on || focus == NONE || !wins[focus].used) {
+		return 0;
+	};
+	return wins[focus].cols;
+};
+
+// Draws any terminal output written since the last frame. The kernel calls this
+// once per scheduling slice, so a program that prints a whole line pays for one
+// repaint rather than one per character.
 export fn sync() void = {
-	if (dirty) {
-		repaint();
+	if (dirty_win != NONE) {
+		const wi = dirty_win;
+		dirty_win = NONE;
+		repaint_win(wi);
 	};
 };
 
@@ -865,7 +1114,9 @@ export fn begin() void = {
 	const wh = TITLE + 2 * BORD + 22 * fb::CH;
 	mx = fb::width() / 2;
 	my = fb::height() / 2;
+	booting = true;
 	new_window((fb::width() - ww) / 2, (fb::height() - wh) / 2);
+	booting = false;
 	fresh = false;		// the shell prints the first prompt itself
 	repaint();
 };

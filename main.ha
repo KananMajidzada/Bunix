@@ -25,11 +25,41 @@ fn on_fault(regs: *arch::registers) uintptr = {
 	console::printnum(arch::fault_address());
 	console::putc('\n');
 	if ((regs.cs & 3) == 3) {
+		// A fault in user space is usually one address that was meant for
+		// something else, and the decimal form says nothing about which.
+		console::print("  rip=");
+		console::printhex(regs.rip);
+		console::print(" rsp=");
+		console::printhex(regs.rsp);
+		console::print(" rbp=");
+		console::printhex(regs.rbp);
+		console::print(" rdi=");
+		console::printhex(regs.rdi);
+		console::print(" rsi=");
+		console::printhex(regs.rsi);
+		console::print(" rax=");
+		console::printhex(regs.rax);
+		console::print(" cr2=");
+		console::printhex(arch::fault_address());
+		console::putc('\n');
 		console::println("killing user process");
 		return sched::fault_kill();
 	};
 	console::println("kernel fault, halting");
 	rt::halt();
+};
+
+// A terminal window is no use empty, so one opened from the menu gets its own
+// shell rather than a second prompt appearing in the window it was opened over.
+fn on_new_win(wi: size) void = {
+	// The window is named before the shell starts, because the shell prints
+	// its banner as soon as it runs. The shell is started sharing the
+	// filesystem rather than with a namespace of its own, so that a file
+	// written in one terminal is visible from another: separate terminals,
+	// one machine.
+	sched::set_spawn_win(wi);
+	const id = loader::run("/sh");
+	sched::bind_shell(id, wi);
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {
@@ -51,6 +81,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	if (!fb::active()) {
 		fb::vbe();
 	};
+	kit::new_win_hook = &on_new_win;
 	kit::begin();
 
 	if (fb::active()) {
@@ -100,7 +131,9 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	arch::idt_init();
 	arch::pic_remap();
 	arch::timer_init();
+	arch::irq_hook = &console::irq;
 	arch::pic_unmask(0);
+	arch::pic_unmask(1);
 	arch::tss_init();
 	sched::fpu_init();
 
@@ -112,6 +145,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	arch::sti();
 
 	const init_id = loader::run("/sh");
+	sched::bind_shell(init_id, 0);
 	console::println("");
 	shell::monitor(init_id);
 };

@@ -2,6 +2,12 @@ use lib;
 use rt;
 
 def MAXEXTPROG: size = 16;
+def ARENASZ: size = 65536;
+def SCRATCHSZ: size = 1024;
+
+// Storage for unescaping a line and for rewriting a file to append to it.
+let arena: [ARENASZ]u8 = [0...];
+let scratch: [SCRATCHSZ]u8 = [0...];
 def MAXNAME: size = 32;
 
 let extprog_count: size = 0;
@@ -154,15 +160,12 @@ export @symbol("main") fn main() void = {
 		rt::println("bunix user shell, type 'help'");
 		load_bin();
 		for (true) {
-			_ = rt::fresh();	// a window opened while the last command ran
 			rt::print("ush> ");
 			let lb: [128]u8 = [0...];
 			let n = 0z;
 			for (true) {
-				if (rt::fresh()) {
-					// a new terminal took focus; give it a prompt too
-					rt::print("ush> ");
-				};
+				// Each terminal window has a shell of its own, so there is
+				// no second prompt to give when another one is opened.
 				const c = rt::readchr();
 				if (c == 0) {
 					rt::cop();
@@ -196,7 +199,7 @@ export @symbol("main") fn main() void = {
 				rt::println("bye");
 				break;
 			} else if (str_eq(cmd, "help")) {
-				rt::print("cat ls echo write mkdir touch rm user multi halt version exit");
+				rt::print("cat ls echo write mkdir touch rm hd cc user multi halt version exit");
 				help_extprog();
 			} else if (str_eq(cmd, "version")) {
 				const vp: str = "/proc/version";
@@ -210,15 +213,44 @@ export @symbol("main") fn main() void = {
 			} else if (str_eq(cmd, "cat")) {
 				run_cat(rest);
 			} else if (str_eq(cmd, "write")) {
-				const w = lib::first_space(rest);
-				if (w == len(rest)) {
-					rt::println("usage: write <path> <text>");
+				let body = rest;
+				let do_append = false;
+				if (len(body) >= 3 && body[0] == ('-': u8) && body[1] == ('a': u8)
+						&& (body[2] == (' ': u8) || body[2] == ('\t': u8))) {
+					do_append = true;
+					body = body[3..];
+					for (len(body) > 0 && (body[0] == (' ': u8) || body[0] == ('\t': u8))) {
+						body = body[1..];
+					};
+				};
+				const w = lib::first_space(body);
+				if (w == len(body)) {
+					rt::println("usage: write [-a] <path> <text>");
 				} else {
-					const k = rt::writefile(*(&rest[..w]: *str), rest[w + 1..]);
+					const path = body[..w];
+					let raw = body[w + 1..];
+					if (len(raw) >= 2) {
+						const db = *(&raw: *[]u8);
+						if ((db[0] == ('"': u8) && db[len(db) - 1] == ('"': u8))
+								|| (db[0] == 39 && db[len(db) - 1] == 39)) {
+							raw = raw[1..len(raw) - 1];
+						};
+					};
+					const text = unescape(raw);
+					let k = 0z;
+					if (do_append) {
+						k = append_text(*(&path: *str), text);
+					} else {
+						k = rt::writefile(*(&path: *str), text);
+					};
 					rt::print("wrote ");
 					rt::printnum(k: u64);
 					rt::println(" bytes");
 				};
+			} else if (str_eq(cmd, "hd")) {
+				run_hd(rest);
+			} else if (str_eq(cmd, "cc")) {
+				run_cc(rest);
 			} else if (str_eq(cmd, "mkdir")) {
 				report(rt::mkdir(*(&rest: *str)), "created", "cannot create");
 			} else if (str_eq(cmd, "touch")) {
@@ -227,6 +259,10 @@ export @symbol("main") fn main() void = {
 				report(rt::remove(*(&rest: *str)), "removed", "cannot remove");
 			} else if (is_extprog(cmd)) {
 				// external program with an image of its own
+				run(line);
+			} else if (is_path(cmd)) {
+				// a path into the filesystem: the loader decides whether it
+				// is an executable to run or a file to read
 				run(line);
 			} else if (str_eq(cmd, "user")) {
 				const pid = rt::spawn(*(&rest: *str));
@@ -321,6 +357,15 @@ fn report(ok: bool, yes: str, no: str) void = {
 	};
 };
 
+// A command naming something in the filesystem rather than a built-in. The
+// loader decides whether it is an executable to run or a file to read.
+fn is_path(cmd: []u8) bool = {
+	if (len(cmd) == 0 || cmd[0] != ('/': u8)) {
+		return false;
+	};
+	return rt::exists(*(&cmd: *str));
+};
+
 fn str_eq(b: []u8, s: str) bool = {
 	const sb = *(&s: *[]u8);
 	if (len(b) != len(sb)) {
@@ -356,6 +401,188 @@ fn run_ls(path: []u8) void = {
 			start = i + 1;
 		};
 	};
+};
+
+// Turns the escapes a person actually types at the shell into bytes. Without
+// this, "write f "a\nb"" would store a backslash and an n.
+fn unescape(src: []u8) []u8 = {
+	let n = 0z;
+	let i = 0z;
+	for (i < len(src) && n < len(scratch); i += 1) {
+		let c = src[i];
+		if (c == ('\\': u8) && i + 1 < len(src)) {
+			const e = src[i + 1];
+			i += 1;
+			if (e == ('n': u8)) {
+				c = ('\n': u8);
+			} else if (e == ('t': u8)) {
+				c = ('\t': u8);
+			} else if (e == ('r': u8)) {
+				c = ('\r': u8);
+			} else if (e == ('0': u8)) {
+				c = 0;
+			} else {
+				c = e;
+			};
+		};
+		scratch[n] = c;
+		n += 1;
+	};
+	return scratch[..n];
+};
+
+// Append by rewriting: the filesystem's write always lands at offset zero, so
+// the old bytes have to be carried along.
+fn append_text(path: str, text: []u8) size = {
+	const have = rt::readfile(path, arena[..]);
+	let n = have;
+	for (let i = 0z; i < len(text) && n < len(arena); i += 1) {
+		arena[n] = text[i];
+		n += 1;
+	};
+	return rt::writefile(path, arena[..n]);
+};
+
+fn hexdig(v: u8) u8 = {
+	if (v < 10) {
+		return ('0': u8) + v;
+	};
+	return ('a': u8) + (v - 10);
+};
+
+// Decimal, for "hd <path> <offset>".
+fn parse_num(s: []u8) size = {
+	let n = 0z;
+	for (let i = 0z; i < len(s); i += 1) {
+		if (s[i] < ('0': u8) || s[i] > ('9': u8)) {
+			break;
+		};
+		n = n * 10 + (s[i] - ('0': u8));
+	};
+	return n;
+};
+
+// A hex dump, "hd <path> [offset]". Read through a heap window so it works on
+// a file too large for a stack buffer, which is what a linked executable is.
+fn run_hd(rest: []u8) void = {
+	if (len(rest) == 0) {
+		rt::println("usage: hd <path> [offset]");
+		return;
+	};
+	const sp = lib::first_space(rest);
+	const path = rest[..sp];
+	let off = 0z;
+	if (sp < len(rest)) {
+		off = parse_num(rest[sp + 1..]);
+	};
+	const window = rt::page_alloc(16);
+	if (window == 0) {
+		rt::println("hd: out of memory");
+		return;
+	};
+	const view = (window: *[65536]u8)[..];
+	const n = rt::readfile(*(&path: *str), view);
+	if (n == 0) {
+		rt::println("no such file");
+		return;
+	};
+	for (let i = off; i < n; i += 16) {
+		rt::putc(hexdig((i >> 12): u8 & 0x0f));
+		rt::putc(hexdig((i >> 8): u8 & 0x0f));
+		rt::putc(hexdig((i >> 4): u8 & 0x0f));
+		rt::putc(hexdig(i: u8 & 0x0f));
+		rt::print(": ");
+		for (let j = 0z; j < 16 && i + j < n; j += 1) {
+			const b = view[i + j];
+			rt::putc(hexdig(b >> 4));
+			rt::putc(hexdig(b & 0x0f));
+			rt::putc(' ');
+		};
+		rt::println("");
+	};
+};
+
+// Append one piece onto the end of a buffer.
+fn put_into(out: []u8, at: *size, s: []u8) void = {
+	for (let i = 0z; i < len(s) && *at < len(out); i += 1) {
+		out[*at] = s[i];
+		*at = *at + 1;
+	};
+};
+
+// The command line for the compiler inside Bunix. tcc links against our own
+// startup objects and library and must not go looking for a host system, so the
+// flags are spelled out once here rather than at every prompt.
+fn cc_line(args: []u8) void = {
+	const head: str = "tcc ";
+	const flags: str = "-static -nostdlib -B/usr/lib -L/usr/lib -I/usr/include";
+	const crt1: str = " /usr/lib/crt1.o";
+	const crti: str = " /usr/lib/crti.o";
+	const libc: str = " /usr/lib/libc.a";
+	const crtn: str = " /usr/lib/crtn.o";
+	let buf: [600]u8 = [0...];
+	let n = 0z;
+	put_into(buf[..], &n, *(&head: *[]u8));
+	put_into(buf[..], &n, *(&flags: *[]u8));
+	put_into(buf[..], &n, args);
+	put_into(buf[..], &n, *(&crt1: *[]u8));
+	put_into(buf[..], &n, *(&crti: *[]u8));
+	put_into(buf[..], &n, *(&libc: *[]u8));
+	put_into(buf[..], &n, *(&crtn: *[]u8));
+	run(buf[..n]);
+};
+
+// cc [-o out] source...  compiles and links against the Bunix runtime.
+fn run_cc(rest: []u8) void = {
+	if (len(rest) == 0) {
+		rt::println("usage: cc [-o outfile] file.c ...");
+		return;
+	};
+	const gap: str = " ";
+	let outp: [256]u8 = [0...];
+	let outn = 0z;
+	let srcs: [400]u8 = [0...];
+	let n = 0z;
+	let i = 0z;
+	for (true) {
+		for (i < len(rest) && (rest[i] == (' ': u8) || rest[i] == ('\t': u8))) {
+			i += 1;
+		};
+		const start = i;
+		for (i < len(rest) && rest[i] != (' ': u8) && rest[i] != ('\t': u8)) {
+			i += 1;
+		};
+		if (start == i) {
+			break;
+		};
+		const tok = rest[start..i];
+		if (len(tok) > 2 && tok[0] == ('-': u8) && (tok[1] == ('o': u8) || tok[1] == ('O': u8))) {
+			const v = tok[2..];
+			let k = len(v);
+			if (k > len(outp)) {
+				k = len(outp);
+			};
+			for (let j = 0z; j < k; j += 1) {
+				outp[j] = v[j];
+			};
+			outn = k;
+			continue;
+		};
+		put_into(srcs[..], &n, tok);
+		put_into(srcs[..], &n, *(&gap: *[]u8));
+	};
+	if (n == 0) {
+		rt::println("cc: no input files");
+		return;
+	};
+	let args: [600]u8 = [0...];
+	let an = 0z;
+	const dasho: str = "-o ";
+	put_into(args[..], &an, *(&dasho: *[]u8));
+	put_into(args[..], &an, outp[..outn]);
+	put_into(args[..], &an, *(&gap: *[]u8));
+	put_into(args[..], &an, srcs[..n]);
+	cc_line(args[..an]);
 };
 
 fn run_cat(path: []u8) void = {

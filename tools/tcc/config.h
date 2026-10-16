@@ -14,11 +14,12 @@
 
 /* The standard headers are compiled in, so the include search list only needs
    to cover a program's own headers. */
-#define CONFIG_TCC_SYSINCLUDEPATHS ""
+#define CONFIG_TCC_SYSINCLUDEPATHS "/usr/include:/usr/local/include"
 
 #define CONFIG_TCC_ELFINTERP ""
-#define CONFIG_TCC_CRTPREFIX ""
-#define CONFIG_TCC_LIBPATHS ""
+#define CONFIG_TCC_CRTPREFIX "/usr/lib:/lib"
+#define CONFIG_TCC_LIBPATHS "/usr/lib:/lib"
+#define CONFIG_TCC_PREFIX "/usr"
 #define CONFIG_MULTIARCH_TRIPLET ""
 #define CONFIG_TCC_SYSROOT ""
 #define CONFIG_TCC_TRIPLET ""

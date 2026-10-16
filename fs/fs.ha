@@ -4,15 +4,21 @@ use block;
 use console;
 use mem;
 use paging;
+use rt;
 use sched;
 use sys;
 use user;
 
-def MAXNODE: size = 128;
+// /usr/include alone holds a compiler header set and the C library's, so a
+// directory has to be allowed to hold them. These are sized for that tree;
+// a node costs roughly 200 bytes plus its children array.
+def MAXNODE: size = 512;
 def MAXHANDLE: size = 16;
-def MAXCHILD: size = 8;
+def MAXCHILD: size = 64;
 def MAXNS: size = 8;
-def BUFSZ: size = 2048;
+// A directory listing is the largest thing still gathered into a fixed buffer,
+// and a full one of these node names is a little over 2 KiB.
+def BUFSZ: size = 4096;
 def NOCHILD: size = ~0z;
 
 export type node = struct {
@@ -21,7 +27,7 @@ export type node = struct {
 	isdir: bool,
 	nchild: size,
 	children: [MAXCHILD]size,
-	content: str,
+	content: []u8,
 	gen: nullable *fn(buf: []u8) size,
 	gdsk: nullable *fn(buf: []u8, off: u64, n: size) size,
 	writable: bool,
@@ -101,13 +107,15 @@ let nused: size = 0;
 
 let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
-	content = "", gen = null, gdsk = null, writable = false, wdev = null,
+	content = [], gen = null, gdsk = null, writable = false, wdev = null,
 	wdsk = null, wlen = 0, wbuf = 0, wcap = 0, disk = false, dblock = 0, dlen = 0,
 }...];
 let nnodes: size = 0;
 let root: size = 0;
 let devroot: size = 0;
 let procroot: size = 0;
+let usrroot: size = 0;
+let binroot: size = 0;
 let nss: [MAXNS]ns = [ns {
 	root = 0,
 	inuse = [false...],
@@ -145,7 +153,6 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.isdir = isdir;
 	nd.nchild = 0;
 	nd.children = [0...];
-	nd.content = "";
 	nd.gen = null;
 	nd.gdsk = null;
 	nd.writable = false;
@@ -159,6 +166,33 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.dlen = 0;
 	nused += 1;
 	return id;
+};
+
+// Makes a file visible at a path that may name subdirectories, so a header
+// like "sys/stat.h" lands under a real sys directory rather than as one node
+// whose name happens to contain a slash.
+fn link_into(parent: size, name: []u8, content: []u8) void = {
+	let dir = parent;
+	let start = 0z;
+	for (let i = 0z; i <= len(name); i += 1) {
+		if (i == len(name) || name[i] == ('/': u8)) {
+			if (i > start) {
+				const seg = name[start..i];
+				const last = i == len(name);
+				let child = find(dir, seg);
+				if (child == NOCHILD) {
+					child = mknode(*(&seg: *str), !last);
+					link(dir, child);
+				};
+				if (last) {
+					nodes[child].content = content;
+				} else {
+					dir = child;
+				};
+			};
+			start = i + 1;
+		};
+	};
 };
 
 fn wcopy(dst: uintptr, src: uintptr, n: size) void = {
@@ -179,11 +213,7 @@ fn wreserve(nd: *node, need: size) bool = {
 	if (need <= nd.wcap) {
 		return true;
 	};
-	let want = nd.wcap;
-	if (want < 4096) {
-		want = 4096;
-	};
-	want = ((need + 4096 - 1) / 4096) * 4096;
+	const want = ((need + 4096 - 1) / 4096) * 4096;
 	const p = mem::frames_alloc(want / 4096);
 	if (p == 0) {
 		return false;
@@ -224,10 +254,18 @@ fn nodename(id: size) str = {
 	return *(&nodes[id].nam[..nodes[id].nlen]: *str);
 };
 
-fn link(parent: size, child: size) void = {
+// Refuses a full parent rather than writing past the end of the child array,
+// which is what used to take the kernel down at boot once /usr/include outgrew
+// the per-directory limit.
+fn link(parent: size, child: size) bool = {
 	const p = &nodes[parent];
+	if (p.nchild >= MAXCHILD) {
+		bad_node(parent);
+		return false;
+	};
 	p.children[p.nchild] = child;
 	p.nchild += 1;
+	return true;
 };
 
 fn put_str(buf: []u8, s: str) size = {
@@ -604,7 +642,8 @@ export fn init() void = {
 	link(root, proc);
 
 	const hello = mknode("hello", false);
-	nodes[hello].content = "hello from the Bunix File Protocol\n";
+	let hellos: str = "hello from the Bunix File Protocol\n";
+	nodes[hello].content = *(&hellos: *[]u8);
 	link(root, hello);
 
 	// /tmp belongs to every namespace, shared or private: a ported program
@@ -616,30 +655,44 @@ export fn init() void = {
 	// time by tools/embed.py.
 	const usr = mknode("usr", true);
 	link(root, usr);
+	usrroot = usr;
 	const inc = mknode("include", true);
 	link(usr, inc);
 	for (let i = 0z; i < len(user::headers); i += 1) {
-		const h = mknode(*(&user::headers[i].nam: *str), false);
-		nodes[h].content = *(&user::headers[i].bytes: *str);
-		link(inc, h);
+		link_into(inc, *(&user::headers[i].nam: *[]u8), user::headers[i].bytes);
+	};
+
+	// Create /usr/lib and populate with CRT startup files
+	const lib = mknode("lib", true);
+	link(usr, lib);
+	for (let i = 0z; i < len(user::crts); i += 1) {
+		const id = mknode(*(&user::crts[i].nam: *str), false);
+		nodes[id].content = user::crts[i].bytes;
+		link(lib, id);
+	};
+	for (let i = 0z; i < len(user::libcs); i += 1) {
+		const id = mknode(*(&user::libcs[i].nam: *str), false);
+		nodes[id].content = user::libcs[i].bytes;
+		link(lib, id);
 	};
 
 	const share = mknode("src", true);
 	link(usr, share);
 	for (let i = 0z; i < len(user::srcs); i += 1) {
 		const c = mknode(*(&user::srcs[i].nam: *str), false);
-		nodes[c].content = *(&user::srcs[i].bytes: *str);
+		nodes[c].content = user::srcs[i].bytes;
 		link(share, c);
 	};
 
 	const bin = mknode("bin", true);
 	link(root, bin);
+	binroot = bin;
 	// One /bin entry per program image, taken from the same table the loader
 	// reads, so the names here can never drift from what the shell can run.
 	for (let i = 0z; i < len(user::programs); i += 1) {
 		const nm = *(&user::programs[i].nam: *str);
 		const id = mknode(nm, false);
-		nodes[id].content = "";
+		nodes[id].content = [];
 		link(bin, id);
 	};
 
@@ -701,6 +754,8 @@ fn ns_root_make() size = {
 	const r = mknode("/", true);
 	link(r, devroot);
 	link(r, procroot);
+	link(r, usrroot);
+	link(r, binroot);
 	link(r, mknode("tmp", true));
 	return r;
 };
@@ -813,13 +868,11 @@ fn listdir(id: size) []u8 = {
 };
 
 export fn list_path(path: str) []u8 = {
-	const s = cur();
-	const fid = walkpath(s, *(&path: *[]u8));
-	if (fid == bfp::NOHANDLE) {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
 		let empty: []u8 = [];
 		return empty;
 	};
-	const id = s.hnode[fid: size];
 	return listdir(id);
 };
 
@@ -885,7 +938,7 @@ fn do_read(s: *ns, w: *bfp::writer, r: *bfp::reader) void = {
 		case null =>
 			match (nodes[id].gen) {
 			case null =>
-				data = *(&nodes[id].content: *[]u8);
+				data = nodes[id].content;
 			case let g: *fn(buf: []u8) size =>
 				const k = g(scratch[..]);
 				data = scratch[..k];
@@ -1132,56 +1185,173 @@ fn read_all(s: *ns, fid: u32) []u8 = {
 	return filebuf[..count];
 };
 
-export fn cat(path: str) []u8 = {
-	const s = cur();
-	const p = *(&path: *[]u8);
-	const fid = walkpath(s, p);
-	if (fid == bfp::NOHANDLE) {
-		return filebuf[..0];
+// A path resolves straight to a node id. The old route sent a string of wire
+// messages (proto, attach, one walk per component) and ended at a 2 KiB
+// message buffer, which capped every read at that size and was the single
+// biggest cost in the compiler's file handling. Nothing here needs the wire:
+// the "server" is this same file.
+fn lookup(path: []u8) size = {
+	let id = cur().root;
+	let start = 0z;
+	for (let i = 0z; i <= len(path); i += 1) {
+		if (i == len(path) || path[i] == ('/': u8)) {
+			if (i > start) {
+				id = find(id, path[start..i]);
+				if (id == NOCHILD) {
+					return NOCHILD;
+				};
+			};
+			start = i + 1;
+		};
 	};
-	return read_all(s, fid);
+	return id;
 };
 
-export fn exists(path: str) bool = {
-	const s = cur();
-	const p = *(&path: *[]u8);
-	return walkpath(s, p) != bfp::NOHANDLE;
+fn copy_in(dst: uintptr, src: []u8, n: size) void = {
+	for (let i = 0z; i < n; i += 1) {
+		*((dst + i): *u8) = src[i];
+	};
 };
 
-export fn write_file(path: str, data: []u8) size = {
-	const s = cur();
-	const p = *(&path: *[]u8);
-	const fid = walkpath(s, p);
-	if (fid == bfp::NOHANDLE) {
-		return 0;
+fn copy_out(dst: []u8, src: uintptr, n: size) void = {
+	for (let i = 0z; i < n; i += 1) {
+		dst[i] = *((src + i): *u8);
 	};
+};
 
-	let w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TOPEN, 5);
-	bfp::w_u32(&w, fid);
-	bfp::w_u8(&w, 1);
-	_ = send(s, &w);
+fn copy_bytes(dst: []u8, src: []u8, n: size) void = {
+	for (let i = 0z; i < n; i += 1) {
+		dst[i] = src[i];
+	};
+};
 
-	w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TWRITE, 6);
-	bfp::w_u32(&w, fid);
-	bfp::w_u64(&w, 0);
-	bfp::w_u16(&w, len(data): u16);
-	bfp::w_bytes(&w, data);
-	const resp = send(s, &w);
-	let r = bfp::reader { buf = resp, off = bfp::HDR };
-	const n = bfp::r_u32(&r): size;
-
-	w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TCLUNK, 7);
-	bfp::w_u32(&w, fid);
-	_ = send(s, &w);
-
+// Hand a node's bytes to dest, filling at most len(dest) of it. A regular
+// file yields its contents; a directory yields its name listing.
+fn read_node(id: size, dest: []u8) size = {
+	const nd = &nodes[id];
+	if (nd.isdir) {
+		const l = listdir(id);
+		let n = len(l);
+		if (n > len(dest)) {
+			n = len(dest);
+		};
+		copy_bytes(dest, l, n);
+		return n;
+	};
+	if (nd.writable) {
+		let n = nd.wlen;
+		if (n > len(dest)) {
+			n = len(dest);
+		};
+		copy_out(dest, nd.wbuf, n);
+		return n;
+	};
+	match (nd.gdsk) {
+	case let g: *fn(buf: []u8, off: u64, n: size) size =>
+		return g(dest, 0, len(dest));
+	case null => void;
+	};
+	match (nd.gen) {
+	case let g: *fn(buf: []u8) size =>
+		return g(dest);
+	case null => void;
+	};
+	let n = len(nd.content);
+	if (n > len(dest)) {
+		n = len(dest);
+	};
+	copy_bytes(dest, nd.content, n);
 	return n;
 };
 
+export fn read(path: str, dest: []u8) size = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return 0;
+	};
+	return read_node(id, dest);
+};
+
+export type filestat = struct {
+	length: u64,
+	isdir: bool,
+};
+
+// Size and type without moving any bytes. The old route to a stat was to read
+// the whole file and count, which made every stat(2) cost as much as a read.
+export fn stat(path: str, out: *filestat) bool = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return false;
+	};
+	const nd = &nodes[id];
+	out.isdir = nd.isdir;
+	out.length = 0;
+	if (!nd.isdir) {
+		if (nd.writable) {
+			out.length = nd.wlen: u64;
+		} else if (nd.gdsk == null && nd.gen == null) {
+			out.length = len(nd.content): u64;
+		};
+	};
+	return true;
+};
+
+export fn cat(path: str) []u8 = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return filebuf[..0];
+	};
+	const n = read_node(id, filebuf[..]);
+	return filebuf[..n];
+};
+
+export fn exists(path: str) bool = {
+	return lookup(*(&path: *[]u8)) != NOCHILD;
+};
+
+export fn write_file(path: str, data: []u8) size = {
+	const p = *(&path: *[]u8);
+	let id = lookup(p);
+	if (id == NOCHILD) {
+		// A plain "write this file" makes the file when it is not there yet.
+		// Without this the first write of a new file simply vanished.
+		if (!create(path, false)) {
+			return 0;
+		};
+		id = lookup(p);
+		if (id == NOCHILD) {
+			return 0;
+		};
+	};
+	const nd = &nodes[id];
+	match (nd.wdev) {
+	case let f: *fn(buf: []u8) size =>
+		return f(data);
+	case null => void;
+	};
+	match (nd.wdsk) {
+	case let f: *fn(data: []u8, off: u64) size =>
+		return f(data, 0);
+	case null => void;
+	};
+	if (!nd.writable) {
+		return 0;
+	};
+	if (!wreserve(nd, len(data))) {
+		return 0;
+	};
+	copy_in(nd.wbuf, data, len(data));
+	// What was just written is the whole file; a longer previous version must
+	// not leave a tail behind.
+	nd.wlen = len(data);
+	if (nd.disk) {
+		dstore(id);
+	};
+	return len(data);
+};
+
 export fn create(path: str, isdir: bool) bool = {
-	const s = cur();
 	const p = *(&path: *[]u8);
 	let slash = NOCHILD;
 	for (let i = 0z; i < len(p); i += 1) {
@@ -1194,53 +1364,47 @@ export fn create(path: str, isdir: bool) bool = {
 	};
 	const parent = if (slash == 0) "/" else *(&p[..slash]: *str);
 	const base = p[slash + 1..];
-	if (len(base) == 0) {
+	if (len(base) == 0 || len(base) > 31) {
 		return false;
 	};
-	const fid = walkpath(s, *(&parent: *[]u8));
-	if (fid == bfp::NOHANDLE) {
+	const pid = lookup(*(&parent: *[]u8));
+	if (pid == NOCHILD || !nodes[pid].isdir) {
 		return false;
 	};
-
-	let w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TCREATE, 8);
-	bfp::w_u32(&w, fid);
-	bfp::w_u16(&w, len(base): u16);
-	bfp::w_bytes(&w, base);
-	bfp::w_u8(&w, if (isdir) 1 else 0);
-	const resp = send(s, &w);
-	let r = bfp::reader { buf = resp, off = bfp::HDR };
-	_ = bfp::r_u8(&r);
-	_ = bfp::r_u32(&r);
-	const nid = bfp::r_u64(&r);
-
-	w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TCLUNK, 9);
-	bfp::w_u32(&w, fid);
-	_ = send(s, &w);
-
-	return nid != (bfp::NOHANDLE: u64);
+	if (nodes[pid].nchild >= MAXCHILD || nnodes >= MAXNODE) {
+		return false;
+	};
+	if (find(pid, base) != NOCHILD) {
+		return false;
+	};
+	const child = mknode(*(&base: *str), isdir);
+	nodes[child].writable = !isdir;
+	link(pid, child);
+	if (nodes[pid].disk) {
+		nodes[child].disk = true;
+		if (isdir) {
+			nodes[child].dblock = dalloc();
+			dsave_dir(child);
+		};
+		dsave_dir(pid);
+	};
+	return true;
 };
 
 export fn remove(path: str) bool = {
-	const s = cur();
-	const p = *(&path: *[]u8);
-	const fid = walkpath(s, p);
-	if (fid == bfp::NOHANDLE) {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD || id == cur().root) {
 		return false;
 	};
-
-	let w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TREMOVE, 8);
-	bfp::w_u32(&w, fid);
-	const resp = send(s, &w);
-	let r = bfp::reader { buf = resp, off = bfp::HDR };
-	const ok = bfp::r_u32(&r);
-
-	w = bfp::writer { buf = reqbuf[..], off = 0 };
-	bfp::begin(&w, bfp::TCLUNK, 9);
-	bfp::w_u32(&w, fid);
-	_ = send(s, &w);
-
-	return ok != 0;
+	if (nodes[id].isdir && nodes[id].nchild > 0) {
+		return false;
+	};
+	const parent = dfind_parent(id);
+	const wasdisk = nodes[id].disk;
+	unlink(id);
+	free_node(id);
+	if (wasdisk && parent != NOCHILD) {
+		dsave_dir(parent);
+	};
+	return true;
 };

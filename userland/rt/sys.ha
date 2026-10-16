@@ -29,6 +29,8 @@ type shdr = struct {
 @symbol("rt.sys_spawn_shared") fn sys_spawn_shared(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_alive") fn sys_alive(id: u64) u64;
 @symbol("rt.sys_fresh") fn sys_fresh() u64;
+@symbol("rt.sys_stat") fn sys_stat(pptr: uintptr, plen: size, sizeptr: uintptr, modeptr: uintptr) u64;
+@symbol("rt.sys_screen") fn sys_screen(rowsp: uintptr, colsp: uintptr) u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -101,6 +103,66 @@ export fn readfile(path: str, dest: []u8) size = {
 	const p = *(&path: *shdr);
 	const d = *(&dest: *shdr);
 	return sys_read(p.data, p.length, d.data, d.length): size;
+};
+
+// Scratch for the size syscall: bytes at offset 0, kind at offset 8. A
+// package-level buffer, since the call needs their addresses.
+let statbuf: [16]u8 = [0...];
+
+fn stat_of(path: str, bytes: *u64, kind: *u32) bool = {
+	const p = *(&path: *shdr);
+	statbuf[0] = 0;
+	statbuf[8] = 0;
+	if (sys_stat(p.data, p.length, &statbuf[0]: uintptr, &statbuf[8]: uintptr) == 0) {
+		return false;
+	};
+	*bytes = *((&statbuf[0]: uintptr): *u64);
+	*kind = *((&statbuf[8]: uintptr): *u32);
+	return true;
+};
+
+// Whether a path names something that is there. The size syscall answers
+// without moving any bytes, which a one-byte read could not: it cannot tell an
+// empty file from a name that is not there.
+export fn exists(path: str) bool = {
+	let n: u64 = 0;
+	let k: u32 = 0;
+	return stat_of(path, &n, &k);
+};
+
+// The size of a file in bytes, or zero when there is nothing at that path.
+export fn filesize(path: str) u64 = {
+	let n: u64 = 0;
+	let k: u32 = 0;
+	if (!stat_of(path, &n, &k)) {
+		return 0;
+	};
+	return n;
+};
+
+// The console size in rows and columns. The kernel's text console interprets
+// the escape sequences an editor draws with, so a program can lay itself out to
+// fit whatever screen there is.
+let screenbuf: [8]u8 = [0...];
+
+fn screen() bool = {
+	screenbuf[0] = 0;
+	screenbuf[4] = 0;
+	return sys_screen(&screenbuf[0]: uintptr, &screenbuf[4]: uintptr) != 0;
+};
+
+export fn screen_rows() u64 = {
+	if (!screen()) {
+		return 25;
+	};
+	return *((&screenbuf[0]: uintptr): *u32): u64;
+};
+
+export fn screen_cols() u64 = {
+	if (!screen()) {
+		return 80;
+	};
+	return *((&screenbuf[4]: uintptr): *u32): u64;
 };
 
 export fn writefile(path: str, data: []u8) size = {

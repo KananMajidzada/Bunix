@@ -23,20 +23,23 @@
 #define PAGESZ 4096
 #define BUFCAP 65536
 
+// A descriptor is a window on a file held whole in memory. The kernel moves a
+// file in one call, so read and lseek walk the bytes open pulled in and close
+// hands them back. The window grows on demand, because a compiler's output can
+// be far larger than any fixed buffer would allow.
 typedef struct {
     int used;
     int wronly;
     int isdir;
-    uint64_t base;
-    size_t length;
+    uint8_t *buf;
+    size_t cap;      // bytes allocated
+    size_t length;   // valid bytes
     size_t cursor;
     char path[256];
 } slot_t;
 
 static slot_t slots[NFD];
 
-// A descriptor is three small integers plus a fixed window of the file. The
-// base is found by linear search, which is fine at NFD.
 static int slot(void) {
     for (int i = 3; i < NFD; i++) {
         if (!slots[i].used) return i;
@@ -49,10 +52,46 @@ static int valid(int fd) {
 }
 
 // Both /proc/uptime and directory listings are small, so a fixed page is
-// enough for either.
+// plenty for either.
 static size_t small_read(const char *path, void *buf, size_t n) {
     long r = bunix_readfile(path, buf, n);
     return r < 0 ? 0 : (size_t)r;
+}
+
+// A whole file, with an initial guess from stat. Reading until the buffer is
+// not full and then doubling covers a file that grew in between, so nothing is
+// quietly cut off at a fixed size.
+static uint8_t *slurp(const char *path, size_t hint, size_t *len_out, size_t *cap_out) {
+    size_t cap = hint + 1;
+    if (cap < BUFCAP) cap = BUFCAP;
+    uint8_t *buf = malloc(cap);
+    if (!buf) { *len_out = 0; *cap_out = 0; return NULL; }
+    for (;;) {
+        size_t n = small_read(path, buf, cap);
+        if (n < cap) { *len_out = n; *cap_out = cap; return buf; }
+        size_t ncap = cap * 2;
+        uint8_t *nb = malloc(ncap);
+        if (!nb) { *len_out = n; *cap_out = cap; return buf; }
+        free(buf);
+        buf = nb;
+        cap = ncap;
+    }
+}
+
+// Grows a descriptor's window to hold at least `need` bytes.
+static int grow_slot(int fd, size_t need) {
+    size_t cap = slots[fd].cap ? slots[fd].cap : BUFCAP;
+    while (cap < need) {
+        if (cap > (size_t)-1 / 2) return 0;
+        cap *= 2;
+    }
+    uint8_t *nb = malloc(cap);
+    if (!nb) return 0;
+    if (slots[fd].length) memcpy(nb, slots[fd].buf, slots[fd].length);
+    free(slots[fd].buf);
+    slots[fd].buf = nb;
+    slots[fd].cap = cap;
+    return 1;
 }
 
 int open(const char *p, int flags, ...) {
@@ -64,6 +103,8 @@ int open(const char *p, int flags, ...) {
     slots[i].isdir = 0;
     slots[i].cursor = 0;
     slots[i].length = 0;
+    slots[i].cap = 0;
+    slots[i].buf = NULL;
 
     size_t n = strlen(p);
     if (n >= sizeof(slots[i].path)) {
@@ -72,24 +113,50 @@ int open(const char *p, int flags, ...) {
     }
     memcpy(slots[i].path, p, n + 1);
 
+    struct bunix_stat st;
+    int exists = bunix_stat(p, &st);
+
     if (slots[i].wronly) {
+        if (!exists && !(flags & O_CREAT)) {
+            slots[i].used = 0;
+            return -1;
+        }
         // A writer starts empty, except when it is appending to what is
         // already there.
-        uint8_t *buf = malloc(BUFCAP);
-        if (!buf) { slots[i].used = 0; return -1; }
-        slots[i].base = (uint64_t)buf;
-        slots[i].length = (flags & O_APPEND) ? small_read(p, buf, BUFCAP) : 0;
+        if ((flags & O_APPEND) && exists && !st.mode) {
+            size_t cap;
+            uint8_t *buf = slurp(p, st.size, &slots[i].length, &cap);
+            if (!buf) { slots[i].used = 0; return -1; }
+            slots[i].buf = buf;
+            slots[i].cap = cap;
+        } else {
+            uint8_t *buf = malloc(BUFCAP);
+            if (!buf) { slots[i].used = 0; return -1; }
+            slots[i].buf = buf;
+            slots[i].cap = BUFCAP;
+        }
         slots[i].cursor = (flags & O_APPEND) ? slots[i].length : 0;
-        if ((flags & O_CREAT) && !slots[i].length) {
+        if ((flags & O_CREAT) && !exists) {
             bunix_create(p, 0);
         }
         return i;
     }
 
-    uint8_t *buf = malloc(BUFCAP);
+    if (!exists) {
+        slots[i].used = 0;
+        return -1;
+    }
+    if (st.mode) {
+        // A directory: readable as a name listing, but not as a file.
+        slots[i].isdir = 1;
+        return i;
+    }
+
+    size_t cap;
+    uint8_t *buf = slurp(p, st.size, &slots[i].length, &cap);
     if (!buf) { slots[i].used = 0; return -1; }
-    slots[i].base = (uint64_t)buf;
-    slots[i].length = small_read(p, buf, BUFCAP);
+    slots[i].buf = buf;
+    slots[i].cap = cap;
     return i;
 }
 
@@ -110,11 +177,11 @@ ssize_t read(int fd, void *buf, size_t count) {
         }
         return (ssize_t)n;
     }
-    if (!valid(fd) || slots[fd].wronly) return -1;
+    if (!valid(fd) || slots[fd].wronly || slots[fd].isdir) return -1;
 
     size_t n = slots[fd].length - slots[fd].cursor;
     if (n > count) n = count;
-    memcpy(buf, (const void *)(slots[fd].base + slots[fd].cursor), n);
+    if (n) memcpy(buf, slots[fd].buf + slots[fd].cursor, n);
     slots[fd].cursor += n;
     return (ssize_t)n;
 }
@@ -128,29 +195,27 @@ ssize_t write(int fd, const void *buf, size_t count) {
     // A write lands at the cursor, not at the end. Seeking past the end and
     // writing there is how a program lays out a file with holes in it, which
     // is exactly what an ELF writer does; the gap reads back as zeroes.
-    uint8_t *dst = (uint8_t *)slots[fd].base;
+    size_t need = slots[fd].cursor + count;
+    if (need > slots[fd].cap && !grow_slot(fd, need)) return -1;
+
+    uint8_t *dst = slots[fd].buf;
     if (slots[fd].cursor > slots[fd].length) {
-        size_t gap = slots[fd].cursor - slots[fd].length;
-        if (slots[fd].cursor > BUFCAP) return -1;
-        memset(dst + slots[fd].length, 0, gap);
+        memset(dst + slots[fd].length, 0, slots[fd].cursor - slots[fd].length);
         slots[fd].length = slots[fd].cursor;
     }
-
-    size_t n = 0;
-    while (n < count && slots[fd].cursor < BUFCAP) {
-        dst[slots[fd].cursor++] = ((const uint8_t *)buf)[n++];
-    }
+    if (count) memcpy(dst + slots[fd].cursor, buf, count);
+    slots[fd].cursor += count;
     if (slots[fd].cursor > slots[fd].length) slots[fd].length = slots[fd].cursor;
-    return (ssize_t)n;
+    return (ssize_t)count;
 }
 
 int close(int fd) {
     if (!valid(fd)) return -1;
     if (slots[fd].wronly) {
-        bunix_writefile(slots[fd].path,
-                        (const void *)slots[fd].base, slots[fd].length);
+        bunix_writefile(slots[fd].path, slots[fd].buf, slots[fd].length);
     }
-    free((void *)slots[fd].base);
+    free(slots[fd].buf);
+    slots[fd].buf = NULL;
     slots[fd].used = 0;
     return 0;
 }
@@ -185,38 +250,28 @@ int fstat(int fd, stat_t *st) {
     }
     if (!valid(fd)) return -1;
     memset(st, 0, sizeof(*st));
-    st->st_mode = S_IFREG;
+    st->st_mode = slots[fd].isdir ? S_IFDIR : S_IFREG;
     st->st_size = (off_t)slots[fd].length;
     return 0;
 }
 
 int stat(const char *path, stat_t *st) {
+    struct bunix_stat bst;
     memset(st, 0, sizeof(*st));
-    st->st_mode = S_IFREG;
-
-    uint8_t probe[1];
-    long n = bunix_readfile(path, probe, 1);
-    if (n < 0) {
-        // Not readable as a file; it may still be a directory.
-        uint8_t names[512];
-        long d = bunix_readdir(path, names, sizeof(names));
-        if (d < 0) return -1;
-        st->st_mode = S_IFDIR;
-        return 0;
-    }
-
-    // Ask for the whole thing so the size comes out right.
-    uint8_t *buf = malloc(BUFCAP);
-    if (!buf) return -1;
-    size_t len = small_read(path, buf, BUFCAP);
-    free(buf);
-    st->st_size = (off_t)len;
+    if (!bunix_stat(path, &bst)) return -1;
+    st->st_mode = bst.mode ? S_IFDIR : S_IFREG;
+    st->st_size = (off_t)bst.size;
     return 0;
 }
 
 int ftruncate(int fd, off_t len) {
-    if (!valid(fd)) return -1;
-    if ((size_t)len < slots[fd].length) slots[fd].length = (size_t)len;
+    if (!valid(fd) || len < 0) return -1;
+    if ((size_t)len > slots[fd].length) {
+        if ((size_t)len > slots[fd].cap && !grow_slot(fd, (size_t)len)) return -1;
+        memset(slots[fd].buf + slots[fd].length, 0, (size_t)len - slots[fd].length);
+    }
+    slots[fd].length = (size_t)len;
+    if (slots[fd].cursor > slots[fd].length) slots[fd].cursor = slots[fd].length;
     return 0;
 }
 
@@ -236,12 +291,9 @@ int rmdir(const char *path) {
 }
 
 int access(const char *path, int mode) {
-    uint8_t probe[1];
-    long n = bunix_readfile(path, probe, 1);
-    if (n >= 0) return 0;
-    uint8_t names[512];
-    long d = bunix_readdir(path, names, sizeof(names));
-    return d < 0 ? -1 : 0;
+    (void)mode;
+    struct bunix_stat st;
+    return bunix_stat(path, &st) ? 0 : -1;
 }
 
 int isatty(int fd) {
