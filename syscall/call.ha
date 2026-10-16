@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use console;
 use fs;
 use kit;
@@ -32,7 +32,7 @@ type raw = struct {
 };
 
 export fn init() void = {
-	arch::syscall_hook = &handle;
+	architecture::syscall_hook = &handle;
 };
 
 fn asstr(ptr: uintptr, n: size) str = {
@@ -56,32 +56,32 @@ fn asbuf(ptr: uintptr, n: size) []u8 = {
 	return *(&r: *[]u8);
 };
 
-fn readfile(regs: *arch::registers) u64 = {
+fn readfile(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	const dest = asbuf(regs.rdx: uintptr, regs.rcx: size);
 	return fs::read(path, dest): u64;
 };
 
-fn writefile(regs: *arch::registers) u64 = {
+fn writefile(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	const data = asstr(regs.rdx: uintptr, regs.rcx: size);
 	const b = *(&data: *[]u8);
 	return fs::write_file(path, b): u64;
 };
 
-fn createpath(regs: *arch::registers) u64 = {
+fn createpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return if (fs::create(path, regs.rdx != 0)) 1 else 0;
 };
 
-fn removepath(regs: *arch::registers) u64 = {
+fn removepath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return if (fs::remove(path)) 1 else 0;
 };
 
 // Fills *(u64*)rdx with the size and *(u32*)rcx with 1 for a directory or 0 for
 // a file. Returns 1 when the path exists, 0 when it does not.
-fn statpath(regs: *arch::registers) u64 = {
+fn statpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	let st = fs::filestat { length = 0, isdir = false };
 	if (!fs::stat(path, &st)) {
@@ -92,7 +92,7 @@ fn statpath(regs: *arch::registers) u64 = {
 	return 1;
 };
 
-fn readdirpath(regs: *arch::registers) u64 = {
+fn readdirpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	const data = fs::list_path(path);
 	let n = len(data);
@@ -106,18 +106,18 @@ fn readdirpath(regs: *arch::registers) u64 = {
 	return n: u64;
 };
 
-fn spawnpath(regs: *arch::registers) u64 = {
+fn spawnpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return loader::run_fresh(path): u64;
 };
 
 // Starts a program in the caller's namespace, so it sees the same files.
-fn spawnpath_shared(regs: *arch::registers) u64 = {
+fn spawnpath_shared(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return loader::run(path): u64;
 };
 
-fn handle(regs: *arch::registers) uintptr = {
+fn handle(regs: *architecture::registers) uintptr = {
 	switch (regs.rax) {
 	case EXIT =>
 		sched::retire();

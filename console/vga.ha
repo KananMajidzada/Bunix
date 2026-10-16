@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 
 def MEM: uintptr = 0xB8000;
 def COLS: size = 80;
@@ -14,10 +14,10 @@ fn cell(y: size, x: size) *u16 = {
 };
 
 export fn vga_init() void = {
-	arch::outb(0x3C8, 7);
-	arch::outb(0x3C9, 0x3F);
-	arch::outb(0x3C9, 0x3F);
-	arch::outb(0x3C9, 0x3F);
+	architecture::outb(0x3C8, 7);
+	architecture::outb(0x3C9, 0x3F);
+	architecture::outb(0x3C9, 0x3F);
+	architecture::outb(0x3C9, 0x3F);
 	vga_clear();
 };
 
@@ -188,8 +188,8 @@ fn scroll() void = {
 
 fn sync_cursor() void = {
 	const pos = row * COLS + col;
-	arch::outb(0x3D4, 0x0F);
-	arch::outb(0x3D5, (pos & 0xFF): u8);
-	arch::outb(0x3D4, 0x0E);
-	arch::outb(0x3D5, ((pos >> 8) & 0xFF): u8);
+	architecture::outb(0x3D4, 0x0F);
+	architecture::outb(0x3D5, (pos & 0xFF): u8);
+	architecture::outb(0x3D4, 0x0E);
+	architecture::outb(0x3D5, ((pos >> 8) & 0xFF): u8);
 };

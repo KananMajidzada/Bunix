@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 
 // Primary IDE controller in PIO mode on the conventional ports.
 
@@ -20,24 +20,24 @@ let present: bool = false;
 let nsec: u64 = 0;
 
 @init fn init() void = {
-	arch::outb(DRVS, 0xA0);
-	arch::io_wait();
-	if (arch::inb(CMDS) == 0xFF) {
+	architecture::outb(DRVS, 0xA0);
+	architecture::io_wait();
+	if (architecture::inb(CMDS) == 0xFF) {
 		return;
 	};
-	arch::outb(CMDS, 0xEC);
-	if (arch::inb(CMDS) == 0x00) {
+	architecture::outb(CMDS, 0xEC);
+	if (architecture::inb(CMDS) == 0x00) {
 		return;
 	};
 	if (!wait_bsy() || !wait_drq()) {
 		return;
 	};
 	let id: [512]u8 = [0...];
-	arch::insl(DATA, (&id[0]: uintptr), 128);
+	architecture::insl(DATA, (&id[0]: uintptr), 128);
 	const w60 = (id[120]: u32) | ((id[121]: u32) << 8);
 	const w61 = (id[122]: u32) | ((id[123]: u32) << 8);
 	nsec = (w61: u64 << 16) | (w60: u64);
-	for ((arch::inb(STAT) & BSY) != 0) {
+	for ((architecture::inb(STAT) & BSY) != 0) {
 		void;
 	};
 	present = nsec > 0;
@@ -48,7 +48,7 @@ export fn nsect() u64 = nsec;
 
 fn wait_bsy() bool = {
 	for (let i = 0z; i < 1000000; i += 1) {
-		if ((arch::inb(STAT) & BSY) == 0) {
+		if ((architecture::inb(STAT) & BSY) == 0) {
 			return true;
 		};
 	};
@@ -57,7 +57,7 @@ fn wait_bsy() bool = {
 
 fn wait_drq() bool = {
 	for (let i = 0z; i < 1000000; i += 1) {
-		const st = arch::inb(STAT);
+		const st = architecture::inb(STAT);
 		if ((st & ERR) != 0) {
 			return false;
 		};
@@ -72,13 +72,13 @@ fn select(sec: u64, cmd: u8) bool = {
 	if (!present || sec >= nsec) {
 		return false;
 	};
-	arch::outb(DRVS, 0xE0 | ((sec >> 24) & 0x0F): u8);
-	arch::io_wait();
-	arch::outb(SECT, 1);
-	arch::outb(LBA0, sec: u8);
-	arch::outb(LBA1, (sec >> 8): u8);
-	arch::outb(LBA2, (sec >> 16): u8);
-	arch::outb(CMDS, cmd);
+	architecture::outb(DRVS, 0xE0 | ((sec >> 24) & 0x0F): u8);
+	architecture::io_wait();
+	architecture::outb(SECT, 1);
+	architecture::outb(LBA0, sec: u8);
+	architecture::outb(LBA1, (sec >> 8): u8);
+	architecture::outb(LBA2, (sec >> 16): u8);
+	architecture::outb(CMDS, cmd);
 	return true;
 };
 
@@ -89,7 +89,7 @@ export fn read(sec: u64, buf: []u8) bool = {
 	if (!wait_bsy() || !wait_drq()) {
 		return false;
 	};
-	arch::insl(DATA, (&buf[0]: uintptr), 128);
+	architecture::insl(DATA, (&buf[0]: uintptr), 128);
 	return true;
 };
 
@@ -100,9 +100,9 @@ export fn write(sec: u64, buf: []u8) bool = {
 	if (!wait_bsy() || !wait_drq()) {
 		return false;
 	};
-	arch::outsl(DATA, (&buf[0]: uintptr), 128);
+	architecture::outsl(DATA, (&buf[0]: uintptr), 128);
 	if (!wait_bsy()) {
 		return false;
 	};
-	return (arch::inb(STAT) & ERR) == 0;
+	return (architecture::inb(STAT) & ERR) == 0;
 };

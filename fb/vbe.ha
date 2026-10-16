@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use paging;
 
 // When the bootloader gives no framebuffer, switch the VGA card ourselves: the
@@ -15,8 +15,8 @@ def MODE_W: size = 1024;
 def MODE_H: size = 768;
 
 fn vbereg(idx: u16, val: u16) void = {
-	arch::outw(VBE_INDEX, idx);
-	arch::outw(VBE_DATA, val);
+	architecture::outw(VBE_INDEX, idx);
+	architecture::outw(VBE_DATA, val);
 };
 
 fn pci_addr(bus: u32, dev: u32, func: u32, reg: u32) u32 = {
@@ -24,13 +24,13 @@ fn pci_addr(bus: u32, dev: u32, func: u32, reg: u32) u32 = {
 };
 
 fn pci_read(bus: u32, dev: u32, func: u32, reg: u32) u32 = {
-	arch::outl(PCI_ADDR, pci_addr(bus, dev, func, reg));
-	return arch::inl(PCI_DATA);
+	architecture::outl(PCI_ADDR, pci_addr(bus, dev, func, reg));
+	return architecture::inl(PCI_DATA);
 };
 
 fn pci_write(bus: u32, dev: u32, func: u32, reg: u32, val: u32) void = {
-	arch::outl(PCI_ADDR, pci_addr(bus, dev, func, reg));
-	arch::outl(PCI_DATA, val);
+	architecture::outl(PCI_ADDR, pci_addr(bus, dev, func, reg));
+	architecture::outl(PCI_DATA, val);
 };
 
 export fn vbe() bool = {

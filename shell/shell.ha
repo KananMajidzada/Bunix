@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use console;
 use fs;
 use loader;
@@ -27,7 +27,7 @@ export fn monitor(id: size) never = {
 			id = loader::run("/sh");
 		};
 		console::poll_mouse();
-		arch::pause();
+		architecture::pause();
 	};
 };
 
@@ -106,11 +106,11 @@ fn exec(mem_mib: u64, line: []u8) void = {
 		console::printnum(mem::total_frames());
 		console::println(" frames");
 	} else if (eq(line, "uptime")) {
-		console::printnum(arch::seconds());
+		console::printnum(architecture::seconds());
 		console::println(" s");
 	} else if (eq(line, "fault")) {
 		console::println("touching an unmapped address");
-		_ = arch::probe(0x100000000);
+		_ = architecture::probe(0x100000000);
 	} else if (eq(line, "halt")) {
 		rt::halt();
 	} else {
@@ -223,7 +223,7 @@ fn worker(arg: uintptr) void = {
 	const i = arg: size;
 	for (true) {
 		counters[i] += 1;
-		arch::pause();
+		architecture::pause();
 	};
 };
 
@@ -266,7 +266,7 @@ fn run_user(path: str) void = {
 		return;
 	};
 	for (sched::alive(id)) {
-		arch::pause();
+		architecture::pause();
 	};
 	console::println("user process exited");
 };
@@ -293,7 +293,7 @@ fn multi() void = {
 				live = true;
 			};
 		};
-		arch::pause();
+		architecture::pause();
 	};
 	console::println("all user processes exited");
 };

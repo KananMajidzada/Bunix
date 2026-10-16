@@ -1,6 +1,6 @@
 use rt;
 
-@symbol("arch.isr_stubs") const isr_stubs: [*]uintptr;
+@symbol("architecture.isr_stubs") const isr_stubs: [*]uintptr;
 
 export def SYSCALL: size = 128;
 
@@ -22,7 +22,7 @@ export let syscall_hook: nullable *fn(regs: *registers) uintptr = null;
 
 // The address a fault was raised for, kept by the page-fault stub.
 
-@symbol("arch.cr2_addr") let cr2_addr: u64;
+@symbol("architecture.cr2_addr") let cr2_addr: u64;
 
 export fn fault_address() u64 = return cr2_addr;
 

@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use block;
 use boot;
 use console;
@@ -14,7 +14,7 @@ use shell;
 use sys;
 use syscall;
 
-fn on_fault(regs: *arch::registers) uintptr = {
+fn on_fault(regs: *architecture::registers) uintptr = {
 	console::print("\nexception ");
 	console::printnum(regs.vector);
 	console::print(" error ");
@@ -22,7 +22,7 @@ fn on_fault(regs: *arch::registers) uintptr = {
 	console::print(" at ");
 	console::printnum(regs.rip);
 	console::print(" addr ");
-	console::printnum(arch::fault_address());
+	console::printnum(architecture::fault_address());
 	console::putc('\n');
 	if ((regs.cs & 3) == 3) {
 		// A fault in user space is usually one address that was meant for
@@ -40,7 +40,7 @@ fn on_fault(regs: *arch::registers) uintptr = {
 		console::print(" rax=");
 		console::printhex(regs.rax);
 		console::print(" cr2=");
-		console::printhex(arch::fault_address());
+		console::printhex(architecture::fault_address());
 		console::putc('\n');
 		console::println("killing user process");
 		return sched::fault_kill();
@@ -127,22 +127,22 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		console::println("none");
 	};
 
-	arch::fault_hook = &on_fault;
-	arch::idt_init();
-	arch::pic_remap();
-	arch::timer_init();
-	arch::irq_hook = &console::irq;
-	arch::pic_unmask(0);
-	arch::pic_unmask(1);
-	arch::tss_init();
+	architecture::fault_hook = &on_fault;
+	architecture::idt_init();
+	architecture::pic_remap();
+	architecture::timer_init();
+	architecture::irq_hook = &console::irq;
+	architecture::pic_unmask(0);
+	architecture::pic_unmask(1);
+	architecture::tss_init();
 	sched::fpu_init();
 
 	console::println("");
 	console::println("starting user init.");
 	syscall::init();
 	sched::start();
-	arch::sched_hook = &sched::tick;
-	arch::sti();
+	architecture::sched_hook = &sched::tick;
+	architecture::sti();
 
 	const init_id = loader::run("/sh");
 	sched::bind_shell(init_id, 0);

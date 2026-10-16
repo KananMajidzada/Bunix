@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use kit;
 use rt;
 
@@ -132,7 +132,7 @@ export fn getch() u8 = {
 				return ch;
 			};
 		};
-		arch::pause();
+		architecture::pause();
 	};
 };
 
@@ -140,13 +140,13 @@ export fn getch() u8 = {
 // one thread can be waiting for input, so a guard keeps a preempted draw from
 // being interleaved by another one.
 export fn poll_mouse() void = {
-	const irq = arch::irq_save();
+	const irq = architecture::irq_save();
 	if (in_poll) {
-		arch::irq_restore(irq);
+		architecture::irq_restore(irq);
 		return;
 	};
 	in_poll = true;
-	arch::irq_restore(irq);
+	architecture::irq_restore(irq);
 	mouse_poll();
 	const dx = mouse_dx();
 	const dy = mouse_dy();

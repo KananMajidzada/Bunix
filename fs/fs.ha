@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use bfp;
 use block;
 use console;
@@ -320,7 +320,7 @@ fn version_info(buf: []u8, n: size, line: size) size = {
 		m += put_str(buf[m..], sys::VERSION);
 	case 4 =>
 		m += put_str(buf[m..], "Uptime: ");
-		m += put_num(buf[m..], arch::seconds());
+		m += put_num(buf[m..], architecture::seconds());
 		buf[m] = 's': u8;
 		m += 1;
 	case 5 =>
@@ -362,7 +362,7 @@ fn gen_version(buf: []u8) size = {
 };
 
 fn gen_uptime(buf: []u8) size = {
-	let n = put_num(buf, arch::seconds());
+	let n = put_num(buf, architecture::seconds());
 	buf[n] = '\n': u8;
 	n += 1;
 	return n;

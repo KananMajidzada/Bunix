@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 
 // Scan code set 1. Non-printing keys map to zero.
 const unshifted: [128]u8 = [
@@ -107,17 +107,17 @@ fn take() u8 = {
 		rawn -= 1;
 		return sc;
 	};
-	const st = arch::inb(0x64);
+	const st = architecture::inb(0x64);
 	if ((st & 1) == 0 || (st & 0x20) != 0) {
 		return 0;
 	};
-	return arch::inb(0x60);
+	return architecture::inb(0x60);
 };
 
 // Waits for the controller to take a byte, so setup does not race it.
 fn kb_wait_write() void = {
 	for (let i = 0; i < 100000; i += 1) {
-		if ((arch::inb(0x64) & 2) == 0) {
+		if ((architecture::inb(0x64) & 2) == 0) {
 			return;
 		};
 	};
@@ -126,7 +126,7 @@ fn kb_wait_write() void = {
 // Waits for a byte to arrive, for the commands that return one.
 fn kb_wait_read() void = {
 	for (let i = 0; i < 100000; i += 1) {
-		if ((arch::inb(0x64) & 1) != 0) {
+		if ((architecture::inb(0x64) & 1) != 0) {
 			return;
 		};
 	};
@@ -138,24 +138,24 @@ fn kb_wait_read() void = {
 // empty however it was read.
 export fn keyboard_init() void = {
 	kb_wait_write();
-	arch::outb(0x64, 0xAE);			// enable the keyboard port
+	architecture::outb(0x64, 0xAE);			// enable the keyboard port
 	// Drain anything the controller is holding so no stale byte is taken for
 	// a keystroke later on.
 	for (let i = 0; i < 16; i += 1) {
-		if ((arch::inb(0x64) & 1) == 0) {
+		if ((architecture::inb(0x64) & 1) == 0) {
 			break;
 		};
-		_ = arch::inb(0x60);
+		_ = architecture::inb(0x60);
 	};
 	kb_wait_write();
-	arch::outb(0x64, 0x20);			// ask for the configuration byte
+	architecture::outb(0x64, 0x20);			// ask for the configuration byte
 	kb_wait_read();
-	const cfg = arch::inb(0x60);
+	const cfg = architecture::inb(0x60);
 	// Bit 0 off asks the controller to raise an interrupt for each key.
 	kb_wait_write();
-	arch::outb(0x64, 0x60);			// this is the configuration byte
+	architecture::outb(0x64, 0x60);			// this is the configuration byte
 	kb_wait_write();
-	arch::outb(0x60, cfg & 0xFE);
+	architecture::outb(0x60, cfg & 0xFE);
 };
 
 // Called from the keyboard interrupt.
@@ -183,7 +183,7 @@ export fn keyboard_has_data() bool = {
 	// The interrupt normally fills the ring, but it is masked while a
 	// program runs with interrupts off and is not wired up until the console
 	// is set up, so the controller is still asked directly.
-	const st = arch::inb(0x64);
+	const st = architecture::inb(0x64);
 	return (st & 1) != 0 && (st & 0x20) == 0;
 };
 

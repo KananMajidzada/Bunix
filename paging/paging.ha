@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use mem;
 
 def ENTRY_P: u64 = 1;
@@ -29,16 +29,16 @@ export fn map_fb(paddr: uintptr, bytes: u64) void = {
 	};
 	boot_pdpt[slot: size] = (fbpd: u64) | ENTRY_P | ENTRY_W;
 	fb_slot = slot;
-	arch::write_cr3(arch::read_cr3());
+	architecture::write_cr3(architecture::read_cr3());
 };
 
 export fn init() void = {
-	boot = arch::read_cr3();
+	boot = architecture::read_cr3();
 };
 
 export fn kernel() uintptr = boot;
 
-export fn current() uintptr = arch::read_cr3();
+export fn current() uintptr = architecture::read_cr3();
 
 fn zero(p: uintptr, n: size) void = {
 	for (let i = 0z; i < n; i += 1) {
@@ -113,11 +113,11 @@ export fn map_user(
 };
 
 export fn flush(vaddr: u64) void = {
-	arch::invlpg(vaddr: uintptr);
+	architecture::invlpg(vaddr: uintptr);
 };
 
 export fn leave(space: uintptr) void = {
-	arch::write_cr3(space);
+	architecture::write_cr3(space);
 };
 
 // Frees every frame mapped in the user window plus the page tables of the

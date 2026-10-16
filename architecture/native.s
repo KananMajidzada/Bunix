@@ -1,49 +1,49 @@
 .text
 
-.global arch.outb
-arch.outb:
+.global architecture.outb
+architecture.outb:
 	movw %di, %dx
 	movb %sil, %al
 	outb %al, %dx
 	ret
 
-.global arch.inb
-arch.inb:
+.global architecture.inb
+architecture.inb:
 	movw %di, %dx
 	xorl %eax, %eax
 	inb %dx, %al
 	ret
 
-.global arch.outw
-arch.outw:
+.global architecture.outw
+architecture.outw:
 	movw %di, %dx
 	movw %si, %ax
 	outw %ax, %dx
 	ret
 
-.global arch.inw
-arch.inw:
+.global architecture.inw
+architecture.inw:
 	movw %di, %dx
 	xorl %eax, %eax
 	inw %dx, %ax
 	ret
 
-.global arch.outl
-arch.outl:
+.global architecture.outl
+architecture.outl:
 	movw %di, %dx
 	movl %esi, %eax
 	outl %eax, %dx
 	ret
 
-.global arch.inl
-arch.inl:
+.global architecture.inl
+architecture.inl:
 	movw %di, %dx
 	xorl %eax, %eax
 	inl %dx, %eax
 	ret
 
-.global arch.insl
-arch.insl:
+.global architecture.insl
+architecture.insl:
 	movl %edx, %ecx
 	movw %di, %dx
 	movq %rsi, %rdi
@@ -51,8 +51,8 @@ arch.insl:
 	rep insl (%dx), %es:(%rdi)
 	ret
 
-.global arch.outsl
-arch.outsl:
+.global architecture.outsl
+architecture.outsl:
 	movl %edx, %ecx
 	movw %di, %dx
 	movq %rsi, %rdi
@@ -60,53 +60,53 @@ arch.outsl:
 	rep outsl %ds:(%rsi), (%dx)
 	ret
 
-.global arch.cli
-arch.cli:
+.global architecture.cli
+architecture.cli:
 	cli
 	ret
 
-.global arch.sti
-arch.sti:
+.global architecture.sti
+architecture.sti:
 	sti
 	ret
 
 /* A short delay by writing to the unused port 0x80. */
-.global arch.io_wait
-arch.io_wait:
+.global architecture.io_wait
+architecture.io_wait:
 	xorl %eax, %eax
 	movw $0x80, %dx
 	outb %al, %dx
 	ret
 
 /* Read one byte, used to provoke a fault on an unmapped address. */
-.global arch.probe
-arch.probe:
+.global architecture.probe
+architecture.probe:
 	movq %rdi, %rax
 	movb (%rax), %al
 	ret
 
-.global arch.pause
-arch.pause:
+.global architecture.pause
+architecture.pause:
 	pause
 	ret
 
 /* Return RFLAGS and disable interrupts; pair with irq_restore. */
-.global arch.irq_save
-arch.irq_save:
+.global architecture.irq_save
+architecture.irq_save:
 	pushfq
 	popq %rax
 	cli
 	ret
 
-.global arch.irq_restore
-arch.irq_restore:
+.global architecture.irq_restore
+architecture.irq_restore:
 	pushq %rdi
 	popfq
 	ret
 
 /* Block copy through rep movsq, finishing the tail with bytes. */
-.global arch.memcpy
-arch.memcpy:
+.global architecture.memcpy
+architecture.memcpy:
 	movq %rdx, %rcx
 	shrq $3, %rcx
 	cld
@@ -117,71 +117,71 @@ arch.memcpy:
 	ret
 
 /* Fill through rep stosq with a repeating 8-byte word. */
-.global arch.store64
-arch.store64:
+.global architecture.store64
+architecture.store64:
 	movq %rsi, %rax
 	movq %rdx, %rcx
 	cld
 	rep stosq
 	ret
 
-.global arch.ltr
-arch.ltr:
+.global architecture.ltr
+architecture.ltr:
 	movw %di, %ax
 	ltr %ax
 	ret
 
-.global arch.read_cr3
-arch.read_cr3:
+.global architecture.read_cr3
+architecture.read_cr3:
 	movq %cr3, %rax
 	ret
 
-.global arch.write_cr3
-arch.write_cr3:
+.global architecture.write_cr3
+architecture.write_cr3:
 	movq %rdi, %cr3
 	ret
 
-.global arch.read_cr0
-arch.read_cr0:
+.global architecture.read_cr0
+architecture.read_cr0:
 	movq %cr0, %rax
 	ret
 
-.global arch.write_cr0
-arch.write_cr0:
+.global architecture.write_cr0
+architecture.write_cr0:
 	movq %rdi, %cr0
 	ret
 
-.global arch.read_cr4
-arch.read_cr4:
+.global architecture.read_cr4
+architecture.read_cr4:
 	movq %cr4, %rax
 	ret
 
-.global arch.write_cr4
-arch.write_cr4:
+.global architecture.write_cr4
+architecture.write_cr4:
 	movq %rdi, %cr4
 	ret
 
 # Puts the FPU and SSE into a known state. fxrstor leaves the registers at
 # whatever the last fxsave recorded, so the image is set up first and the
 # control words are cleared, which also sets the x87 tag word.
-.global arch.fpu_init
-arch.fpu_init:
+.global architecture.fpu_init
+architecture.fpu_init:
 	fninit
 	fxsave (%rdi)
 	fxrstor (%rdi)
 	ret
 
-.global arch.fpu_save
-arch.fpu_save:
+.global architecture.fpu_save
+architecture.fpu_save:
 	fxsave (%rdi)
 	ret
 
-.global arch.fpu_load
-arch.fpu_load:
+.global architecture.fpu_load
+architecture.fpu_load:
 	fxrstor (%rdi)
 	ret
 
-.global arch.invlpg
-arch.invlpg:
+.global architecture.invlpg
+architecture.invlpg:
 	invlpg (%rdi)
 	ret

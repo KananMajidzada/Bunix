@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use kit;
 use mem;
 use paging;
@@ -48,12 +48,12 @@ let fpuready: [MAXTHREADS]bool = [false...];
 // clear or every x87 instruction raises #NM, and CR4 has to say that the OS
 // handles SSE and the legacy area.
 export fn fpu_init() void = {
-	const c0 = arch::read_cr0();
-	arch::write_cr0((c0 & ~((1 << 2) | (1 << 3))): uintptr);
-	const c4 = arch::read_cr4();
-	arch::write_cr4((c4 | (1 << 9) | (1 << 10)): uintptr);
+	const c0 = architecture::read_cr0();
+	architecture::write_cr0((c0 & ~((1 << 2) | (1 << 3))): uintptr);
+	const c4 = architecture::read_cr4();
+	architecture::write_cr4((c4 | (1 << 9) | (1 << 10)): uintptr);
 
-	arch::fpu_init(thread_fpu(0));
+	architecture::fpu_init(thread_fpu(0));
 	fpuready[0] = true;
 };
 
@@ -287,7 +287,7 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 	for (let i = 0z; i < FPU_SZ; i += 1) {
 		*((save + (i: uintptr)): *u8) = 0;
 	};
-	arch::fpu_init(save);
+	architecture::fpu_init(save);
 	// A thread started on behalf of a particular terminal belongs to that
 	// terminal, not to the window of whichever process happened to ask for
 	// it. Setting this before starting the process matters: the very first
@@ -397,7 +397,7 @@ fn pick_next() uintptr = {
 	// Park the outgoing thread's FPU and SSE registers before touching the
 	// incoming one's, so the two never share an area.
 	if (fpuready[current]) {
-		arch::fpu_save(threads[current].fpu);
+		architecture::fpu_save(threads[current].fpu);
 	};
 	let next = current;
 	for (let i = 1z; i <= nthreads; i += 1) {
@@ -411,10 +411,10 @@ fn pick_next() uintptr = {
 	// Output follows the running thread into its own window.
 	kit::set_out_win(threads[current].win);
 	if (fpuready[current]) {
-		arch::fpu_load(threads[current].fpu);
+		architecture::fpu_load(threads[current].fpu);
 	};
 	if (threads[current].kernel != 0) {
-		arch::set_rsp0(threads[current].kernel);
+		architecture::set_rsp0(threads[current].kernel);
 	};
 	const sp = threads[current].space;
 	const target = if (sp == 0) paging::kernel() else sp;
@@ -424,7 +424,7 @@ fn pick_next() uintptr = {
 	return threads[current].frame;
 };
 
-export fn tick(regs: *arch::registers) uintptr = {
+export fn tick(regs: *architecture::registers) uintptr = {
 	threads[current].frame = regs: uintptr;
 	return pick_next();
 };

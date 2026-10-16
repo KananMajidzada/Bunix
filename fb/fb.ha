@@ -1,4 +1,4 @@
-use arch;
+use architecture;
 use boot;
 use mem;
 use paging;
@@ -95,7 +95,7 @@ export fn fill(x: size, y: size, w: size, h: size, c: u32) void = {
 		const words = (w - i) / 2z;
 		if (words > 0) {
 			const b = addr + ((y + j) * pitch + (x + i) * 4): uintptr;
-			arch::store64(b, pair, words);
+			architecture::store64(b, pair, words);
 		};
 		if ((w - i) % 2z == 1) {
 			px(x + w - 1, y + j, c);
@@ -108,7 +108,7 @@ export fn present() void = {
 	if (shadow == 0) {
 		return;
 	};
-	arch::memcpy(real, shadow, pitch * fbh);
+	architecture::memcpy(real, shadow, pitch * fbh);
 };
 
 export fn present_rect(x: size, y: size, w: size, h: size) void = {
@@ -123,7 +123,7 @@ export fn present_rect(x: size, y: size, w: size, h: size) void = {
 	};
 	for (let j = 0z; j < h; j += 1) {
 		const off = (y + j) * pitch + x * 4;
-		arch::memcpy(real + off, shadow + off, w * 4);
+		architecture::memcpy(real + off, shadow + off, w * 4);
 	};
 };
 
