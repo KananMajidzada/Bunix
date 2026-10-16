@@ -1,132 +1,46 @@
 # Bunix
 
-An independent operating system written in Hare. The kernel exposes its own
-small set of system calls and reaches resources through file servers rather
-than imitating POSIX; POSIX software is served later by a userspace port
-environment, not by the kernel. Bunix is not a clone of any existing system.
-Some ideas in its design trace back to earlier file-oriented systems, but it
-shares no code and no protocol with them.
-
-The kernel currently targets x86_64 and boots as a Multiboot image.
-
-## Building
-
-The tree is built entirely with the Hare toolchain; there is no C in the
-kernel. It expects `hare`, `harec`, `qbe`, `as`, and `ld` on `PATH`.
-
-	make
-
-The result is a Multiboot ELF named `bunix`.
-
-## Running
-
-	qemu-system-x86_64 -m 256 -kernel bunix -serial stdio
-
-or `make run`. The kernel writes its boot log to a serial console, a VGA text
-console, and a graphical console. The graphical console draws a desktop with a
-window manager, driven by a PS/2 mouse; `-vga std` (the default) works. An
-optional raw disk image plugged into the IDE controller gives the kernel some
-block storage:
-
-	qemu-system-x86_64 -m 256 -kernel bunix -drive file=disk.raw,format=raw,if=ide
-
-The boot log then reports the disk, and `/dev/disk` reads and writes whole
-sectors of it. A disk filesystem is mounted at `/mnt`: files and directories
-created there are written straight through to the drive and are still there
-next boot.
-
-## Layout
-
-| Path        | Contents                                        |
-|-------------|-------------------------------------------------|
-| `rt/`       | Freestanding Hare runtime: entry, memory ops, heap |
-| `debug/`    | Placeholder module the build driver expects     |
-| `arch/`     | x86_64 CPU, port, interrupt, PIC, timer, TSS    |
-| `boot/`     | Multiboot information parsing                   |
-| `mem/`      | Physical frame allocator                        |
-| `paging/`   | Per-process page tables and address spaces      |
-| `bfp/`      | Bunix File Protocol: wire format, server, client |
-| `block/`    | ATA PIO driver for the primary IDE controller  |
-| `fs/`       | In-kernel file namespace served over BFP        |
-| `sys/`      | System name and version                         |
-| `console/`  | Serial, VGA text, keyboard, and PS/2 mouse      |
-| `fb/`       | Framebuffer, VBE mode set, and an 8x16 font     |
-| `kit/`      | Plan 9-style window manager on the framebuffer  |
-| `sched/`    | Round-robin thread scheduler                    |
-| `syscall/`  | System call dispatch                            |
-| `loader/`   | Loads user programs into their address space    |
-| `shell/`    | Console command loop                            |
-| `user/`     | Generated program images and the table names them |
-| `userland/` | User program source and freestanding runtime    |
-| `main.ha`   | Kernel entry point                              |
-
-## Status
-
-The kernel enters long mode, brings up the serial and VGA consoles, reads the
-Multiboot memory map, manages physical frames with a bitmap, and runs a
-PIT-driven clock behind an interrupt descriptor table. It runs kernel threads
-and user-mode (ring 3) processes, each with its own address space, and serves a
-file namespace over the Bunix File Protocol.
-
-At boot the kernel starts a user-mode init, a shell running in ring 3 that owns
-the console. It offers a handful of built-ins and runs `hello`, `wc`, `grep`,
-and `cp` as programs with loadable images of their own:
-
-	cat ls echo write mkdir touch rm hello wc grep cp user multi halt version exit
-
-On a VGA framebuffer the kernel also runs a small window manager. It keeps a
-shadow buffer in RAM and copies it to the device on every change, so moving or
-resizing a window leaves nothing behind. Windows are drawn rio-style: a title
-bar and a border, a scrollbar down the right, and a pop-up menu on the middle or
-right mouse button holding `new`, `resize`, `move`, `delete`, `hide`, and
-`exit`. The left button selects text, drags a window by its title, or grabs a
-border once the pointer rests against it and the frame turns black. The
-terminal that `init` owns appears in a window, and console output goes to
-whichever window has focus.
-
-`user <path>` runs another copy of the program against a path, `user /bad`
-demonstrates the protection boundary (the process is killed for touching
-supervisor memory), `user /ns` shows the process's own file namespace, and
-`multi` runs three programs at once. If init exits, the kernel restarts it.
-
-Each freshly spawned process gets a namespace of its own: `/dev` and `/proc`
-are bound in from the shared tree, a `/tmp` is private to the process, and
-anything else it creates is invisible to every other process. The init shell
-sees the shared namespace. `version` prints the rabbit next to live facts about
-the system.
-
-The file namespace is read and written over BFP. Files under `/dev` and `/proc`
-are served from the kernel: `/dev/note` is a writable store, `/dev/cons` echoes
-writes to the console, `/dev/disk` reads and writes raw sectors of an IDE
-drive through the ATA PIO driver, and `/proc/*` reports live facts. `ls`,
-`cat`, `write`, `mkdir`, `touch`, and `rm` walk that namespace through the
-protocol from userspace and create or remove files in the in-memory tree. Every
-process carries its own namespace, so writes by one process never leak into
-another.
-
-User programs are freestanding Hare programs with their own runtime. They reach
-files through the `readfile` and `writefile` system calls, which travel the BFP
-path into the in-kernel file server, read the console one byte at a time, yield
-the CPU, spawn and watch other processes, allocate memory through an `alloc`
-system call, and print through a `write` system call.
-
-A small POSIX shim in `userland/posix` sits over those calls and offers the
-open/read/write/close shape a ported program expects, plus the usual C string
-routines. The native interface hands a file over in one call, so `open` slurps
-a file into a buffer and `close` flushes it back.
-
-Each command is its own program. `userland/prog/<name>` is built as a
-freestanding Hare image linked at the same address as the shell, folded into the
-kernel with the others as raw bytes. When the shell asks for a program, the
-loader picks an image by the first word of the command line, stripping any
-directory, and starts it in the caller's namespace so it opens the same files.
-A name with no image of its own falls through to the shell image, which keeps
-the built-ins and the single-image commands working unchanged. `wc`, `grep`,
-`cp`, and `hello` are the first of these programs; the plan is a `/bin` they are
-discovered through and a C compiler driver that runs against the same shim.
+An operating system written in Hare. It comes with a C compiler and a text
+editor, and both of them run inside Bunix.
 
 ![boot](doc/boot.png)
 
-With an IDE drive attached, the file tree under `/mnt` lives on it and
-outlives the machine; everything else in the kernel tree is memory-only. See
-`DESIGN.md` for the on-disk layout.
+It boots into a small window manager. Every terminal has a shell of its own, so
+you can keep a few going at once.
+
+![windows](doc/windows.png)
+
+tcc is part of the system. Write some C, compile it, run it, without leaving.
+
+![compile](doc/compile.png)
+
+	ush> write /tmp/hello.c "#include <stdio.h>\nint main(void){printf(\"hello from Bunix\\n\");return 0;}\n"
+	wrote 74 bytes
+	ush> cc -o /tmp/hello /tmp/hello.c
+	ush> /tmp/hello
+	hello from Bunix
+
+There is also `mei`, an editor that draws straight onto the console. Arrows,
+Home, End, Ctrl-S to save, Ctrl-X to save and quit.
+
+![editor](doc/editor.png)
+
+Some of what the shell knows:
+
+![help](doc/help.png)
+
+## Build
+Needs `hare`, `qbe`, `as` and `ld` on your PATH.
+
+	make
+
+That leaves you a `bunix.bin`.
+
+## Run
+
+	qemu-system-x86_64 -m 256 -kernel bunix.bin -serial stdio
+
+or just `make run`. The screen you get is drawn on the framebuffer; the serial
+line carries the same text.
+
+Type `help` to see what the shell knows.
