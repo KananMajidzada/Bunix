@@ -297,3 +297,5 @@ fn multi() void = {
 	};
 	console::println("all user processes exited");
 };
+
+let hossain = true;
