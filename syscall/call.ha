@@ -23,6 +23,7 @@ export def FRESH: u64 = 13;
 export def SPAWN_SHARED: u64 = 14;
 export def STAT: u64 = 16;
 export def SCREEN: u64 = 17;
+export def REBOOT: u64 = 18;
 
 type raw = struct {
 	data: *[*]u8,
@@ -164,6 +165,13 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case HALT =>
 		rt::halt();
+	case REBOOT =>
+		// The last line the shell printed is still on its way out of the
+		// serial port, and pulling the reset line loses whatever is still
+		// in it. Letting the line go quiet first is the whole difference
+		// between the last thing typed being acknowledged and not.
+		console::serial_flush();
+		rt::reboot();
 	case SPAWN =>
 		regs.rax = spawnpath(regs);
 		return regs: uintptr;

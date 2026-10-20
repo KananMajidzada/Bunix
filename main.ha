@@ -147,5 +147,5 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	const init_id = loader::run("/sh");
 	sched::bind_shell(init_id, 0);
 	console::println("");
-	shell::monitor(init_id);
+	shell::monitor(init_id, mem_mib);
 };

@@ -24,6 +24,15 @@ fn serial_out(ch: u8) void = {
 	architecture::outb(COM1, ch);
 };
 
+// Waits until everything written has actually left the port. The transmit
+// register being empty only means the next byte can be handed to it; the
+// shift register and the FIFO behind it can still be holding a good many, and
+// a line typed at a shell that reboots is exactly the thing that would be
+// lost. Bit six of the line status register says both are empty.
+export fn serial_flush() void = {
+	for ((architecture::inb(COM1 + 5) & 0x40) == 0) void;
+};
+
 export fn serial_has_data() bool = {
 	return (architecture::inb(COM1 + 5) & 1) != 0;
 };

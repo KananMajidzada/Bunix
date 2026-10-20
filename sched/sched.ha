@@ -18,8 +18,16 @@ export type thread = struct {
 	kernel: uintptr,
 	frame: uintptr,
 	space: uintptr,
+	// The shape of the window this thread was given, as the loader laid it
+	// out: the heap starts where the image ends and may grow to heap_end, the
+	// argument page sits above that, and the stack is the pages below stack
+	// which the loader mapped and this points at the top of. Kept here rather
+	// than worked out again because the loader is the only thing that ever
+	// knew, and it knew it once.
 	heap: uintptr,
 	heap_end: uintptr,
+	arg: uintptr,
+	ustack: uintptr,
 	fpu: uintptr,
 	// The terminal window this thread's output belongs to. A thread keeps to
 	// the window it was started in, so a program left running in one window
@@ -64,7 +72,8 @@ fn thread_fpu(i: size) uintptr = {
 
 let threads: [MAXTHREADS]thread = [thread {
 	id = 0, stack = 0, kernel = 0, frame = 0,
-	space = 0, heap = 0, heap_end = 0, fpu = 0, win = 0, alive = false,
+	space = 0, heap = 0, heap_end = 0, arg = 0, ustack = 0,
+	fpu = 0, win = 0, alive = false,
 }...];
 
 let nthreads: size = 0;
@@ -101,7 +110,7 @@ fn free_user(id: size) void = {
 export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
-		space = 0, heap = 0, heap_end = 0,
+		space = 0, heap = 0, heap_end = 0, arg = 0, ustack = 0,
 		fpu = thread_fpu(0), win = 0, alive = true,
 	};
 	nthreads = 1;
@@ -227,6 +236,15 @@ fn clear_input(t: size) void = {
 	incount[t] = 0;
 };
 
+// The record of a thread, for anything outside this module that has to say
+// what a process was given: where its heap is, which window it draws into.
+export fn thread_at(id: size) *thread = {
+	if (id >= MAXTHREADS) {
+		return &threads[0];
+	};
+	return &threads[id];
+};
+
 export fn count() size = nthreads;
 
 export fn live() size = {
@@ -302,6 +320,8 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		space = space,
 		heap = 0,
 		heap_end = 0,
+		arg = 0,
+		ustack = 0,
 		fpu = save,
 		win = w,
 		alive = true,
@@ -365,6 +385,8 @@ export fn spawn_user(
 	enter(id, stack, fp, space);
 	threads[id].heap = heap;
 	threads[id].heap_end = heap_end;
+	threads[id].arg = argptr;
+	threads[id].ustack = ustack;
 	return id;
 };
 

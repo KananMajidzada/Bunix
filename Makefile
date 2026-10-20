@@ -9,7 +9,17 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c tcc mei
+#
+# Each image costs its own text and data in the kernel, so a program of a
+# dozen lines still adds a page-aligned block. That is the price of each of
+# these being a real executable, runnable by path, rather than a branch
+# inside the shell.
+PROGS = hello wc grep cp cc test_c tcc mei \
+        head tail sort uniq cut tr nl tac rev tee seq strings \
+        mv stat tree find du cmp basename dirname which \
+        uname free nproc ps uptime date sleep df \
+        nm readelf od crc32 md5sum sha256sum base64 diff fold \
+        expr printf comm paste split column truncate man
 
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))

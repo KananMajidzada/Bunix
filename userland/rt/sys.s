@@ -72,6 +72,12 @@ rt.sys_halt:
 	int $0x80
 1:	jmp 1b
 
+.global rt.sys_reboot
+rt.sys_reboot:
+	movq $18, %rax
+	int $0x80
+1:	jmp 1b
+
 .global rt.sys_spawn
 rt.sys_spawn:
 	movq $11, %rax

@@ -3,6 +3,7 @@ use block;
 use console;
 use mem;
 use paging;
+use rtc;
 use rt;
 use sched;
 use sys;
@@ -273,6 +274,36 @@ fn put_str(buf: []u8, s: str) size = {
 	return len(b);
 };
 
+fn put_hex(buf: []u8, v: u64) size = {
+	const digits: str = "0123456789abcdef";
+	const alpha = *(&digits: *[]u8);
+	let tmp: [16]u8 = [0...];
+	let i = len(tmp);
+	let x = v;
+	if (x == 0) {
+		i -= 1;
+		tmp[i] = ('0': u8);
+	} else {
+		for (let k = 0u64; x > 0; k += 1) {
+			i -= 1;
+			tmp[i] = alpha[(x % 16): size];
+			x /= 16;
+		};
+	};
+	// A fixed width, so a column of addresses lines up and can be read
+	// against the other one.
+	let n = 0z;
+	for (let k = len(tmp) - i; k < 16; k += 1) {
+		buf[n] = ('0': u8);
+		n += 1;
+	};
+	for (let k = i; k < len(tmp); k += 1) {
+		buf[n] = tmp[k];
+		n += 1;
+	};
+	return n;
+};
+
 fn put_num(buf: []u8, v: u64) size = {
 	let tmp: [20]u8 = [0...];
 	let i = len(tmp);
@@ -386,6 +417,84 @@ fn gen_self(buf: []u8) size = {
 fn gen_threads(buf: []u8) size = {
 	let n = put_str(buf, "threads ");
 	n += put_num(buf[n..], sched::live(): u64);
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
+// The wall clock, as a set of fields a program can pick one out of rather than
+// a line it would have to take apart. Nothing is cached: the clock is two
+// ports away and reading it is cheaper than working out how stale a copy is.
+fn gen_rtc(buf: []u8) size = {
+	if (!rtc::present()) {
+		return put_str(buf, "absent\n");
+	};
+	const c = rtc::now();
+	let n = put_str(buf, "year ");
+	n += put_num(buf[n..], c.year);
+	n += put_str(buf[n..], "\nmonth ");
+	n += put_num(buf[n..], c.month: u64);
+	n += put_str(buf[n..], "\nday ");
+	n += put_num(buf[n..], c.mday: u64);
+	n += put_str(buf[n..], "\nhour ");
+	n += put_num(buf[n..], c.hour: u64);
+	n += put_str(buf[n..], "\nminute ");
+	n += put_num(buf[n..], c.minute: u64);
+	n += put_str(buf[n..], "\nsecond ");
+	n += put_num(buf[n..], c.second: u64);
+	n += put_str(buf[n..], "\nweekday ");
+	n += put_num(buf[n..], c.wday: u64);
+	n += put_str(buf[n..], "\nepoch ");
+	n += put_num(buf[n..], rtc::epoch(c));
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
+// What the address space a process is given looks like from the outside. Every
+// program runs in a window of the same shape, and knowing where the pieces of
+// it are is the first thing anyone asks when a load goes wrong.
+// The window a process was given, as the loader laid it out and the thread
+// remembered it. Every program runs in a window of the same shape, so what
+// differs between two of these is where the image stopped and which page
+// table answers for it.
+fn gen_maps(buf: []u8) size = {
+	const t = sched::thread_at(sched::running());
+	let n = put_str(buf, "image  ends at ");
+	n += put_hex(buf[n..], t.heap);
+	n += put_str(buf[n..], "\nheap   ");
+	n += put_hex(buf[n..], t.heap);
+	n += put_str(buf[n..], "-");
+	n += put_hex(buf[n..], t.heap_end);
+	n += put_str(buf[n..], "\narg    ");
+	n += put_hex(buf[n..], t.arg);
+	n += put_str(buf[n..], "-");
+	n += put_hex(buf[n..], t.arg + 4096);
+	// The stack is pages the loader took off the top of the window, and this
+	// is that top: it grows down from here, so what it may reach is not
+	// written down anywhere the kernel can look up.
+	n += put_str(buf[n..], "\nstack  grows down from ");
+	n += put_hex(buf[n..], t.ustack);
+	n += put_str(buf[n..], "\nspace  ");
+	n += put_hex(buf[n..], t.space);
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
+// What the drive holds and how much of it is still free. The superblock
+// records the next block that will never be handed out, so what is left to
+// write is the difference between that and the size of the drive. Both are
+// counted in sectors, which is all the disk code ever works in.
+fn gen_disk(buf: []u8) size = {
+	let n = put_str(buf, "sectors ");
+	n += put_num(buf[n..], block::nsect());
+	n += put_str(buf[n..], "\nfree ");
+	let left: u64 = 0;
+	if (dnext < block::nsect()) {
+		left = block::nsect() - dnext;
+	};
+	n += put_num(buf[n..], left);
 	buf[n] = '\n': u8;
 	n += 1;
 	return n;
@@ -731,6 +840,18 @@ export fn init() void = {
 	const files = mknode("files", false);
 	nodes[files].gen = &gen_files;
 	link(proc, files);
+
+	const diskfile = mknode("disk", false);
+	nodes[diskfile].gen = &gen_disk;
+	link(proc, diskfile);
+
+	const rtcf = mknode("rtc", false);
+	nodes[rtcf].gen = &gen_rtc;
+	link(proc, rtcf);
+
+	const maps = mknode("maps", false);
+	nodes[maps].gen = &gen_maps;
+	link(proc, maps);
 
 	dmount();
 	nss[0].root = root;

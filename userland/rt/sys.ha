@@ -25,6 +25,7 @@ type shdr = struct {
 @symbol("rt.sys_remove") fn sys_remove(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_readdir") fn sys_readdir(pptr: uintptr, plen: size, dptr: uintptr, dlen: size) u64;
 @symbol("rt.sys_halt") fn sys_halt() never;
+@symbol("rt.sys_reboot") fn sys_reboot() never;
 @symbol("rt.sys_spawn") fn sys_spawn(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_spawn_shared") fn sys_spawn_shared(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_alive") fn sys_alive(id: u64) u64;
@@ -140,6 +141,18 @@ export fn filesize(path: str) u64 = {
 	return n;
 };
 
+// Whether a path names a directory. The size syscall already carries the kind
+// alongside the length, so asking costs no more than the lookup itself, and
+// unlike asking for a listing it is still right for an empty directory.
+export fn isdir(path: str) bool = {
+	let n: u64 = 0;
+	let k: u32 = 0;
+	if (!stat_of(path, &n, &k)) {
+		return false;
+	};
+	return k == 1;
+};
+
 // The console size in rows and columns. The kernel's text console interprets
 // the escape sequences an editor draws with, so a program can lay itself out to
 // fit whatever screen there is.
@@ -193,6 +206,8 @@ export fn readdir(path: str, dest: []u8) size = {
 };
 
 export fn haltsys() never = sys_halt();
+
+export fn rebootsys() never = sys_reboot();
 
 export fn spawn(path: str) u64 = {
 	const p = *(&path: *shdr);
