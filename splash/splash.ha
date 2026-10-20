@@ -1,47 +1,38 @@
 use fb;
 
-// A boot screen, drawn straight onto the framebuffer.
+// A boot screen: the kernel's boot log drawn onto the framebuffer.
 //
-// Everything the kernel says during boot also goes to the serial port, which
-// is how a machine without a screen is watched. On a machine with one, the
-// serial line goes nowhere and the text console has nothing to write into:
-// the bootloader asked the card for a graphics mode, so there are no text
-// cells left to print to, and the window manager that would draw them has not
-// started yet. Without this the screen stays black from the mode switch until
-// the first window appears, which on a slow disk is several seconds of no
-// sign that anything is happening.
-//
-// So the first lines are drawn here instead, on the pixels, in the same font
-// the terminal window uses. It's a scrolling text log with bunny-themed
-// messages because why not.
+// The serial port carries the full transcript for headless machines.
+// Here we mirror the same lines onto the framebuffer so a person at
+// the monitor sees what's happening. It's a simple scrolling text log
+// in the same font the terminal uses. No graphics, no emojis, just
+// the boot log.
 
 def FG: u32 = 0xD0D0D0;
 def DIM: u32 = 0x707070;
 def BG: u32 = 0x101018;
 def ACCENT: u32 = 0x69C8FF;
-def EAR: u32 = 0xFFB6C1;
 
 let started = false;
-let row = 0z;
-let log_lines: [20]str = [""...];
+let log_lines: [24]str = [""...];
 let log_count = 0z;
 
 def MARGIN: size = 4;
-def MAX_ROWS: size = 18;
+def MAX_ROWS: size = 20;
 
 fn row_y(n: size) size = {
-	return 60 + n * (fb::CH + 2);
+	return 40 + n * (fb::CH + 2);
 };
 
 fn push_line(text: str) void = {
-	if (log_count < 20) {
+	if (log_count < 24) {
 		log_lines[log_count] = text;
 		log_count += 1;
 	};
 };
 
 fn redraw_all() void = {
-	let start: size = if (log_count > MAX_ROWS) log_count - MAX_ROWS else 0;
+	const start: size = if (log_count > MAX_ROWS) log_count - MAX_ROWS else 0;
 	for (let i = start; i < log_count; i += 1) {
 		const y = row_y(i - start);
 		fb::text(MARGIN * fb::CW, y, log_lines[i], FG, BG);
@@ -50,26 +41,26 @@ fn redraw_all() void = {
 };
 
 fn add_log(text: str) void = {
-	push_line(text);
+	if (log_count < 24) {
+		log_lines[log_count] = text;
+		log_count += 1;
+	};
 	redraw_all();
 };
 
-// Wipes the screen and writes the title. Called as soon as there are pixels.
+// Wipes the screen and writes the kernel name.
 export fn begin() void = {
 	if (!fb::active()) {
 		return;
 	};
 	started = true;
-	row = 0;
 	log_count = 0;
 	fb::fill(0, 0, fb::width(), fb::height(), BG);
 	fb::text_big(MARGIN * fb::CW, 12, "Bunix", 2, ACCENT, BG);
-	// cute ears
-	fb::text_big((MARGIN + 7) * fb::CW, 12, "🐰", 2, EAR, BG);
 	redraw_all();
 };
 
-// Adds a bunny-themed log line to the scrolling text log.
+// Adds a line to the scrolling boot log.
 export fn log(label: str) void = {
 	if (!started) {
 		return;
@@ -83,7 +74,7 @@ export fn note(label: str, warning: bool) void = {
 		return;
 	};
 	const x = MARGIN * fb::CW;
-	const y = row_y(MAX_ROWS);
+	const y = row_y(21);
 	if (warning) {
 		fb::text(x, y, label, 0xFF8080, BG);
 	} else {
