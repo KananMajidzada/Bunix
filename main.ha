@@ -90,6 +90,15 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	loader::reserve();
 	paging::init();
 
+	// Initialize timer, IDT, and PIC early so the boot screen can pace its
+	// output and the keyboard works for the installer.
+	architecture::timer_init();
+	architecture::idt_init();
+	architecture::pic_remap();
+	architecture::irq_hook = &console::irq;
+	architecture::pic_unmask(0);
+	architecture::pic_unmask(1);
+
 	// Tell the disk layer which drive the machine was started from, so an
 	// installer can name it rather than guess. The number is the BIOS's
 	// own, where 0x80 is the first hard disk and the four IDE drives run
@@ -163,12 +172,6 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	};
 
 	architecture::fault_hook = &on_fault;
-	architecture::idt_init();
-	architecture::pic_remap();
-	architecture::timer_init();
-	architecture::irq_hook = &console::irq;
-	architecture::pic_unmask(0);
-	architecture::pic_unmask(1);
 	architecture::tss_init();
 	sched::fpu_init();
 	splash::log("Interrupts configured");

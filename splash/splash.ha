@@ -1,3 +1,4 @@
+use architecture;
 use fb;
 
 // A boot screen: the kernel's boot log drawn onto the framebuffer.
@@ -66,6 +67,7 @@ export fn log(label: str) void = {
 		return;
 	};
 	add_log(label);
+	sleep_ms(300);  // pause so user can read each line
 };
 
 // A final note (warning or info) at the bottom.
@@ -81,4 +83,15 @@ export fn note(label: str, warning: bool) void = {
 		fb::text(x, y, label, DIM, BG);
 	};
 	fb::present_rect(x, y, fb::width() - x, fb::CH);
+};
+
+// Small delay so each boot line is visible for a moment.
+// Uses a simple busy-wait loop (doesn't rely on timer interrupt).
+fn sleep_ms(ms: u64) void = {
+	// Simple busy-wait delay (approximate, doesn't rely on timer interrupt)
+	// At ~2-3 GHz, this gives roughly the right order of magnitude
+	const iterations = (ms * 100000): size;
+	for (let i = 0z; i < iterations; i += 1) {
+		architecture::pause();
+	};
 };
