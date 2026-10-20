@@ -8,10 +8,10 @@ use fb;
 // in the same font the terminal uses. No graphics, no emojis, just
 // the boot log.
 
-def FG: u32 = 0xD0D0D0;
-def DIM: u32 = 0x707070;
-def BG: u32 = 0x101018;
-def ACCENT: u32 = 0x69C8FF;
+def FG: u32 = 0x000000;  // black text
+def DIM: u32 = 0x404040;  // dark gray text
+def BG: u32 = 0xFFFFFF;  // white background
+def ACCENT: u32 = 0x0000FF;  // blue accent
 
 let started = false;
 let log_lines: [24]str = [""...];
