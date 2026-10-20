@@ -114,8 +114,8 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	// the end of this, and until then a terminal window to print them
 	// into does not exist.
 	splash::begin();
-	splash::step("memory");
-	splash::step("paging");
+	splash::log("🐰 bunny waking up... stretching ears");
+	splash::log("🐰 memory carrots counted: all present");
 
 	if (fb::active()) {
 		console::print("video:     ");
@@ -145,7 +145,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	};
 
 	fs::init();
-	splash::step("filesystem");
+	splash::log("🐰 filesystem burrow dug... nice and cozy");
 	console::print("frames:    ");
 	console::printnum(mem::free_frames());
 	console::print(" free of ");
@@ -157,7 +157,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		console::print("present, ");
 		console::printnum(block::nsect());
 		console::println(" sectors");
-		splash::step("disk");
+		splash::log("🐰 disk carrot found... crunch crunch");
 	} else {
 		console::println("none");
 	};
@@ -171,8 +171,8 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	architecture::pic_unmask(1);
 	architecture::tss_init();
 	sched::fpu_init();
-	splash::step("interrupts");
-	splash::step("scheduler");
+	splash::log("🐰 interrupts hopping... timer ticking");
+	splash::log("🐰 scheduler ready... bunnies in queue");
 
 	console::println("");
 	console::println("starting user init.");

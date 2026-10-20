@@ -12,66 +12,78 @@ use fb;
 // sign that anything is happening.
 //
 // So the first lines are drawn here instead, on the pixels, in the same font
-// the terminal window uses. It is deliberately a handful of lines and not a
-// transcript: the transcript is the serial line, and this is for the person
-// standing in front of the machine.
+// the terminal window uses. It's a scrolling text log with bunny-themed
+// messages because why not.
 
 def FG: u32 = 0xD0D0D0;
 def DIM: u32 = 0x707070;
 def BG: u32 = 0x101018;
 def ACCENT: u32 = 0x69C8FF;
+def EAR: u32 = 0xFFB6C1;
 
 let started = false;
 let row = 0z;
+let log_lines: [20]str = [""...];
+let log_count = 0z;
 
-// The left margin, in cells. The text is put in from the edge rather than
-// centred, because the lines change length as it fills in and a centred
-// block would shuffle sideways while it did.
-def MARGIN: size = 6;
+def MARGIN: size = 4;
+def MAX_ROWS: size = 18;
 
 fn row_y(n: size) size = {
-	return 80 + n * (fb::CH + 4);
+	return 60 + n * (fb::CH + 2);
 };
 
-// Wipes the screen and writes the lines that do not change. Called as soon as
-// there are pixels to draw on, which is before the window manager exists and
-// so before there is any other place for this to go.
+fn push_line(text: str) void = {
+	if (log_count < 20) {
+		log_lines[log_count] = text;
+		log_count += 1;
+	};
+};
+
+fn redraw_all() void = {
+	let start: size = if (log_count > MAX_ROWS) log_count - MAX_ROWS else 0;
+	for (let i = start; i < log_count; i += 1) {
+		const y = row_y(i - start);
+		fb::text(MARGIN * fb::CW, y, log_lines[i], FG, BG);
+	};
+	fb::present();
+};
+
+fn add_log(text: str) void = {
+	push_line(text);
+	redraw_all();
+};
+
+// Wipes the screen and writes the title. Called as soon as there are pixels.
 export fn begin() void = {
 	if (!fb::active()) {
 		return;
 	};
 	started = true;
 	row = 0;
+	log_count = 0;
 	fb::fill(0, 0, fb::width(), fb::height(), BG);
-	fb::text_big(MARGIN * fb::CW, 24, "Bunix", 2, ACCENT, BG);
-	fb::text((MARGIN + 1) * fb::CW, 70,
-		"starting up, one moment", DIM, BG);
-	fb::present();
+	fb::text_big(MARGIN * fb::CW, 12, "Bunix", 2, ACCENT, BG);
+	// cute ears
+	fb::text_big((MARGIN + 7) * fb::CW, 12, "🐰", 2, EAR, BG);
+	redraw_all();
 };
 
-// One line of progress, added as each stage of the boot finishes, so what is
-// on the screen is the stages that are done rather than the one in progress.
-export fn step(label: str) void = {
+// Adds a bunny-themed log line to the scrolling text log.
+export fn log(label: str) void = {
 	if (!started) {
 		return;
 	};
-	const x = MARGIN * fb::CW;
-	const y = row_y(row);
-	fb::text(x, y, "  ok  ", ACCENT, BG);
-	fb::text(x + 6 * fb::CW, y, label, FG, BG);
-	fb::present_rect(x, y, fb::width() - x, fb::CH);
-	row += 1;
+	add_log(label);
 };
 
-// A last line other than the list of stages, for the two things that end the
-// screen: the note that the machine is ready, and any refusal that stops the
-// boot where it stopped.
+// A final note (warning or info) at the bottom.
 export fn note(label: str, warning: bool) void = {
 	if (!started) {
 		return;
 	};
 	const x = MARGIN * fb::CW;
-	const y = row_y(row + 1);
+	const y = row_y(MAX_ROWS);
 	if (warning) {
 		fb::text(x, y, label, 0xFF8080, BG);
 	} else {
