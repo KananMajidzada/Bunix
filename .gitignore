@@ -1,6 +1,7 @@
 build/
 bunix
 bunix.bin
+bunix.img
 user/blob.ha
 user/progs.ha
 user/progs.s

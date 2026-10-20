@@ -206,7 +206,35 @@ run: bunix.bin
 run-nographic: bunix.bin
 	$(QEMU) -m 256 -kernel bunix.bin -display none -serial stdio
 
+# A bootable disk image, for real hardware and for the installer to copy.
+# The bootloader is its own 16-bit program; the kernel goes in after it as
+# a flat binary, because that is what the loader copies into place.
+build/boot.o: boot/boot.s
+	@mkdir -p build
+	$(AS) --32 -o $@ $<
+
+build/boot.elf: build/boot.o boot/boot.ld
+	$(LD) -m elf_i386 -T boot/boot.ld -o $@ $<
+
+build/boot.bin: build/boot.o boot/boot.ld
+	$(LD) -m elf_i386 -T boot/boot.ld --oformat binary -o $@ $<
+
+bunix.img: build/boot.elf build/boot.bin bunix.bin tools/mkdisk.py
+	python3 tools/mkdisk.py build/boot.elf build/boot.bin bunix.bin $@
+
+image: bunix.img
+
+# Boot the disk image the way a machine would: from the disk, not from a
+# kernel handed over by QEMU. This is the path real hardware takes, so it
+# is the one worth testing.
+run-disk: bunix.img
+	$(QEMU) -m 256 -drive format=raw,file=bunix.img,if=ide -boot c -serial stdio
+
+run-disk-nographic: bunix.img
+	$(QEMU) -m 256 -drive format=raw,file=bunix.img,if=ide -boot c \
+		-display none -serial stdio
+
 clean:
 	rm -rf bunix bunix.bin build user/blob.ha user/progs.ha user/progs.s
 
-.PHONY: all run run-nographic clean
+.PHONY: all run run-nographic run-disk run-disk-nographic image clean
