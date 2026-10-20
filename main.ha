@@ -10,6 +10,7 @@ use mem;
 use paging;
 use rt;
 use sched;
+use splash;
 use shell;
 use sys;
 use syscall;
@@ -81,8 +82,17 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	if (!fb::active()) {
 		fb::vbe();
 	};
-	kit::new_win_hook = &on_new_win;
-	kit::begin();
+
+	// From here until the window manager starts, the only thing that can
+	// put anything on a screen is this. It is drawn as soon as there are
+	// pixels to draw on, and each line below is added when that stage has
+	// actually finished. The kernel's own boot lines still go to the
+	// serial port as they always did; the window manager is started at
+	// the end of this, and until then a terminal window to print them
+	// into does not exist.
+	splash::begin();
+	splash::step("memory");
+	splash::step("paging");
 
 	if (fb::active()) {
 		console::print("video:     ");
@@ -112,6 +122,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	};
 
 	fs::init();
+	splash::step("filesystem");
 	console::print("frames:    ");
 	console::printnum(mem::free_frames());
 	console::print(" free of ");
@@ -123,6 +134,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		console::print("present, ");
 		console::printnum(block::nsect());
 		console::println(" sectors");
+		splash::step("disk");
 	} else {
 		console::println("none");
 	};
@@ -136,9 +148,14 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	architecture::pic_unmask(1);
 	architecture::tss_init();
 	sched::fpu_init();
+	splash::step("interrupts");
+	splash::step("scheduler");
 
 	console::println("");
 	console::println("starting user init.");
+	splash::note("ready", false);
+	kit::new_win_hook = &on_new_win;
+	kit::begin();
 	syscall::init();
 	sched::start();
 	architecture::sched_hook = &sched::tick;
