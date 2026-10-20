@@ -1,4 +1,4 @@
-# Bunix
+# Bunix-Bunny's Unix
 
 An operating system written in Hare. It comes with a C compiler and a text
 editor, and both of them run inside Bunix kernel/os.
