@@ -114,6 +114,36 @@ rt.sys_screen:
 	int $0x80
 	ret
 
+.global rt.sys_block_read
+rt.sys_block_read:
+	movq $19, %rax
+	int $0x80
+	ret
+
+.global rt.sys_block_write
+rt.sys_block_write:
+	movq $20, %rax
+	int $0x80
+	ret
+
+.global rt.sys_block_drive_present
+rt.sys_block_drive_present:
+	movq $21, %rax
+	int $0x80
+	ret
+
+.global rt.sys_block_drive_sectors
+rt.sys_block_drive_sectors:
+	movq $22, %rax
+	int $0x80
+	ret
+
+.global rt.sys_boot_drive
+rt.sys_boot_drive:
+	movq $23, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

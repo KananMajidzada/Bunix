@@ -565,15 +565,22 @@ build_mmap:
 	ret
 
 /* Copy the values the BIOS gave into the Multiboot structure, and set the
- * flags that tell the kernel which of them are real. Bits 0 (memory) and
- * 6 (the map) are always set; bit 12 (framebuffer) only if a mode was
- * found, which is the difference between a graphical boot and a text one. */
+ * flags that tell the kernel which of them are real. Bits 0 (memory), 6 (the
+ * map) and 9 (the boot device) are always set; bit 12 (framebuffer) only if a
+ * mode was found, which is the difference between a graphical boot and a text
+ * one. */
 fill_info:
 	movzwl mem_lower_kb, %eax
 	movl %eax, mb_mem_lower
 	movl mem_upper_kb, %eax
 	movl %eax, mb_mem_upper
-	movl $(1 | (1 << 6)), %eax
+	/* The drive the BIOS booted from, in the top byte of the word, which
+	 * is where Multiboot puts it and where the kernel looks for it. It
+	 * is the BIOS's own number: 0x80 is the first hard disk. */
+	movzbl boot_drive, %eax
+	shll $24, %eax
+	movl %eax, mb_boot_device
+	movl $(1 | (1 << 6) | (1 << 9)), %eax
 	cmpl $0, have_vbe
 	je 1f
 	orl $(1 << 12), %eax
@@ -628,7 +635,7 @@ mb_info:
 mb_flags:	.long 0
 mb_mem_lower:	.long 0
 mb_mem_upper:	.long 0
-		.long 0			/* boot_device */
+mb_boot_device:	.long 0			/* filled in before the jump */
 		.long 0			/* cmdline */
 		.long 0			/* mods_count */
 		.long 0			/* mods_addr */

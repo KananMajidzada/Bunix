@@ -32,6 +32,21 @@ type shdr = struct {
 @symbol("rt.sys_fresh") fn sys_fresh() u64;
 @symbol("rt.sys_stat") fn sys_stat(pptr: uintptr, plen: size, sizeptr: uintptr, modeptr: uintptr) u64;
 @symbol("rt.sys_screen") fn sys_screen(rowsp: uintptr, colsp: uintptr) u64;
+@symbol("rt.sys_block_read") fn sys_block_read(
+	drive: u64,
+	sector: u64,
+	dptr: uintptr,
+	dlen: size,
+) u64;
+@symbol("rt.sys_block_write") fn sys_block_write(
+	drive: u64,
+	sector: u64,
+	sptr: uintptr,
+	slen: size,
+) u64;
+@symbol("rt.sys_block_drive_present") fn sys_block_drive_present(drive: u64) u64;
+@symbol("rt.sys_block_drive_sectors") fn sys_block_drive_sectors(drive: u64) u64;
+@symbol("rt.sys_boot_drive") fn sys_boot_drive() u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -226,4 +241,32 @@ export fn alive(id: u64) bool = {
 
 export fn cop() void = {
 	_ = sys_yield();
+};
+
+export fn block_read(drive: size, sector: u64, buf: []u8) int = {
+	if (len(buf) < 512) {
+		return -1;
+	};
+	const r = sys_block_read(drive: u64, sector, (&buf[0]: uintptr), len(buf));
+	return r: int;
+};
+
+export fn block_write(drive: size, sector: u64, buf: []u8) int = {
+	if (len(buf) < 512) {
+		return -1;
+	};
+	const r = sys_block_write(drive: u64, sector, (&buf[0]: uintptr), len(buf));
+	return r: int;
+};
+
+export fn block_drive_present(drive: size) bool = {
+	return sys_block_drive_present(drive: u64) != 0;
+};
+
+export fn block_drive_sectors(drive: size) u64 = {
+	return sys_block_drive_sectors(drive: u64);
+};
+
+export fn boot_drive() size = {
+	return sys_boot_drive(): size;
 };

@@ -3,6 +3,7 @@
 export def MAGIC: u32 = 0x2BADB002;
 
 export def FLAG_MEMORY: u32 = 1 << 0;
+export def FLAG_BOOT_DEVICE: u32 = 1 << 9;
 export def FLAG_MMAP: u32 = 1 << 6;
 export def FLAG_VIDEO: u32 = 1 << 12;
 

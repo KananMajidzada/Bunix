@@ -64,6 +64,17 @@ fn on_new_win(wi: size) void = {
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {
+	// Direct serial test: write a marker so we know the kernel reached main
+	// and the serial port is working before any init runs.
+	architecture::outb(0x3F8, 'K': u8);
+	architecture::outb(0x3F8, 'E': u8);
+	architecture::outb(0x3F8, 'R': u8);
+	architecture::outb(0x3F8, 'N': u8);
+	architecture::outb(0x3F8, 'E': u8);
+	architecture::outb(0x3F8, 'L': u8);
+	architecture::outb(0x3F8, '\n': u8);
+	architecture::outb(0x3F8, '\r': u8);
+
 	if (mbi == 0) {
 		console::println("bunix: no multiboot information");
 		rt::halt();
@@ -78,6 +89,18 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	mem::init(mb);
 	loader::reserve();
 	paging::init();
+
+	// Tell the disk layer which drive the machine was started from, so an
+	// installer can name it rather than guess. The number is the BIOS's
+	// own, where 0x80 is the first hard disk and the four IDE drives run
+	// on from there.
+	if ((mb.flags & boot::FLAG_BOOT_DEVICE) != 0) {
+		const bios = (mb.boot_device >> 24) & 0xFF;
+		if (bios >= 0x80) {
+			block::set_boot_disk((bios - 0x80): size);
+		};
+	};
+
 	fb::init(mb);
 	if (!fb::active()) {
 		fb::vbe();

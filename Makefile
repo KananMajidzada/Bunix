@@ -19,7 +19,7 @@ PROGS = hello wc grep cp cc test_c tcc mei \
         mv stat tree find du cmp basename dirname which \
         uname free nproc ps uptime date sleep df \
         nm readelf od crc32 md5sum sha256sum base64 diff fold \
-        expr printf comm paste split column truncate man
+        expr printf comm paste split column truncate man install
 
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))

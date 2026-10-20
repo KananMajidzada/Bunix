@@ -1,4 +1,5 @@
 use architecture;
+use block;
 use console;
 use fs;
 use kit;
@@ -24,6 +25,11 @@ export def SPAWN_SHARED: u64 = 14;
 export def STAT: u64 = 16;
 export def SCREEN: u64 = 17;
 export def REBOOT: u64 = 18;
+export def BLOCK_READ: u64 = 19;
+export def BLOCK_WRITE: u64 = 20;
+export def BLOCK_DRIVE_PRESENT: u64 = 21;
+export def BLOCK_DRIVE_SECTORS: u64 = 22;
+export def BOOT_DRIVE: u64 = 23;
 
 type raw = struct {
 	data: *[*]u8,
@@ -106,6 +112,31 @@ fn readdirpath(regs: *architecture::registers) u64 = {
 	return n: u64;
 };
 
+fn block_read(regs: *architecture::registers) u64 = {
+	const drive = regs.rdi: size;
+	const sector = regs.rsi: u64;
+	const dest = asbuf(regs.rdx: uintptr, regs.rcx: size);
+	return if (block::read_drive(drive, sector, dest)) 1 else 0;
+};
+
+fn block_write(regs: *architecture::registers) u64 = {
+	const drive = regs.rdi: size;
+	const sector = regs.rsi: u64;
+	const src = asstr(regs.rdx: uintptr, regs.rcx: size);
+	const b = *(&src: *[]u8);
+	return if (block::write_drive(drive, sector, b)) 1 else 0;
+};
+
+fn block_drive_present(regs: *architecture::registers) u64 = {
+	const drive = regs.rdi: size;
+	return if (block::drive_present(drive)) 1 else 0;
+};
+
+fn block_drive_sectors(regs: *architecture::registers) u64 = {
+	const drive = regs.rdi: size;
+	return block::drive_sectors(drive);
+};
+
 fn spawnpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return loader::run_fresh(path): u64;
@@ -180,6 +211,21 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case ALIVE =>
 		regs.rax = if (sched::alive(regs.rdi: size)) 1 else 0;
+		return regs: uintptr;
+	case BLOCK_READ =>
+		regs.rax = block_read(regs);
+		return regs: uintptr;
+	case BLOCK_WRITE =>
+		regs.rax = block_write(regs);
+		return regs: uintptr;
+	case BLOCK_DRIVE_PRESENT =>
+		regs.rax = block_drive_present(regs);
+		return regs: uintptr;
+	case BLOCK_DRIVE_SECTORS =>
+		regs.rax = block_drive_sectors(regs);
+		return regs: uintptr;
+	case BOOT_DRIVE =>
+		regs.rax = block::boot_drive(): u64;
 		return regs: uintptr;
 	case FRESH =>
 		regs.rax = if (kit::take_fresh()) 1 else 0;
