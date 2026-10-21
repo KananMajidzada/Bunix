@@ -35,6 +35,8 @@ typedef long ssize_t;
 #define SYS_SCREEN      17
 #define SYS_CHDIR       18
 #define SYS_PWD         19
+#define SYS_PS          20
+#define SYS_KILL        21
 
 static inline uint64_t syscall0(uint64_t n) {
     uint64_t ret;
@@ -174,6 +176,16 @@ static inline int bunix_chdir(const char *path) {
 // is returned, or zero when it does not fit.
 static inline size_t bunix_pwd(char *buf, size_t count) {
     return (size_t)syscall2(SYS_PWD, (uint64_t)buf, count);
+}
+
+// The processes that are running, one per line.
+static inline size_t bunix_ps(char *buf, size_t count) {
+    return (size_t)syscall2(SYS_PS, (uint64_t)buf, count);
+}
+
+// Stops a process.
+static inline int bunix_kill(uint64_t id) {
+    return (int)syscall1(SYS_KILL, id);
 }
 
 #endif

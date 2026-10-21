@@ -25,6 +25,8 @@ export def STAT: u64 = 16;
 export def SCREEN: u64 = 17;
 export def CHDIR: u64 = 18;
 export def PWD: u64 = 19;
+export def PS: u64 = 20;
+export def KILL: u64 = 21;
 
 type raw = struct {
 	data: *[*]u8,
@@ -118,6 +120,18 @@ fn spawnpath_shared(regs: *architecture::registers) u64 = {
 	return loader::run(path): u64;
 };
 
+// The processes that are running, one per line: the number of the process
+// and the command it was started with.
+fn pslist(regs: *architecture::registers) u64 = {
+	const n = sched::list(asbuf(regs.rdi: uintptr, regs.rsi: size));
+	return n: u64;
+};
+
+// Stops a process.
+fn killpid(regs: *architecture::registers) u64 = {
+	return if (sched::kill(regs.rdi: size)) 1 else 0;
+};
+
 // Moves the calling process into a directory. A relative path is from where
 // the process already is.
 fn changepath(regs: *architecture::registers) u64 = {
@@ -207,6 +221,12 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case PWD =>
 		regs.rax = cwdpath(regs);
+		return regs: uintptr;
+	case PS =>
+		regs.rax = pslist(regs);
+		return regs: uintptr;
+	case KILL =>
+		regs.rax = killpid(regs);
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

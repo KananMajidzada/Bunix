@@ -120,6 +120,18 @@ rt.sys_pwd:
 	int $0x80
 	ret
 
+.global rt.sys_ps
+rt.sys_ps:
+	movq $20, %rax
+	int $0x80
+	ret
+
+.global rt.sys_kill
+rt.sys_kill:
+	movq $21, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

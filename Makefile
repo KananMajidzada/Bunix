@@ -11,7 +11,9 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # and a flat blob (the bytes the loader copies into user memory).
 PROGS = hello wc grep cp cc test_c tcc mei \
 	ls sort uniq head tail tr rev seq expr basename dirname \
-	stat du df test find tree
+	stat du df test find tree \
+	mv nl cut paste comm diff od strings cksum file uname id split \
+	ps kill
 
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))

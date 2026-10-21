@@ -104,6 +104,7 @@ fn finish(
 	image_end: u64,
 	payload: []u8,
 	fresh: bool,
+	cmd: []u8,
 ) size = {
 	if (len(payload) > MAXARG) {
 		return sched::NOID;
@@ -134,6 +135,7 @@ fn finish(
 	);
 	if (id != sched::NOID) {
 		fs::ns_install(id, fresh);
+		sched::set_cmd(id, cmd);
 	};
 	return id;
 };
@@ -265,7 +267,7 @@ fn run_elf(path: []u8, payload: []u8) size = {
 		};
 	};
 	mem::release(bytes);
-	return finish(space, entry, hi, payload, false);
+	return finish(space, entry, hi, payload, false, path);
 };
 
 fn run_with(arg: str, fresh: bool) size = {
@@ -322,5 +324,5 @@ fn run_with(arg: str, fresh: bool) size = {
 		*((frames + (i: uintptr)): *u8) = 0;
 	};
 
-	return finish(space, entry, BASE + image_bytes, payload, fresh);
+	return finish(space, entry, BASE + image_bytes, payload, fresh, b);
 };

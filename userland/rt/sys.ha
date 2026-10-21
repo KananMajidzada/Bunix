@@ -33,6 +33,8 @@ type shdr = struct {
 @symbol("rt.sys_screen") fn sys_screen(rowsp: uintptr, colsp: uintptr) u64;
 @symbol("rt.sys_chdir") fn sys_chdir(pptr: uintptr, plen: size) u64;
 @symbol("rt.sys_pwd") fn sys_pwd(dptr: uintptr, dlen: size) u64;
+@symbol("rt.sys_ps") fn sys_ps(dptr: uintptr, dlen: size) u64;
+@symbol("rt.sys_kill") fn sys_kill(id: u64) u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -158,6 +160,20 @@ export fn isdir(path: str) bool = {
 export fn chdir(path: str) bool = {
 	const p = *(&path: *shdr);
 	return sys_chdir(p.data, p.length) != 0;
+};
+
+// The processes that are running, one per line. The number of the process
+// comes first, and then the command it was started with.
+let psbuf: [4096]u8 = [0...];
+
+export fn ps() []u8 = {
+	const n = sys_ps(&psbuf[0]: uintptr, len(psbuf));
+	return psbuf[..n];
+};
+
+// Stops a process.
+export fn kill(id: u64) bool = {
+	return sys_kill(id) != 0;
 };
 
 // Where the process is, as an absolute path.

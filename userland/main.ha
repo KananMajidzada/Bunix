@@ -1,7 +1,7 @@
 use lib;
 use rt;
 
-def MAXEXTPROG: size = 32;
+def MAXEXTPROG: size = 64;
 def ARENASZ: size = 65536;
 def SCRATCHSZ: size = 1024;
 def MAXNAME: size = 32;
@@ -40,6 +40,19 @@ let hist_len: [MAXHIST]size = [0...];
 let hist_count: size = 0;
 let hist_pos: size = 0;
 
+// The directory the process was in before the last cd, so that "cd -" can
+// go back to it.
+let prevdir: [512]u8 = [0...];
+let prevlen: size = 0;
+
+// A stack of directories, for pushd and popd.
+def MAXDIRS: size = 16;
+let dirstack: [MAXDIRS][512]u8 = [[0...], [0...], [0...], [0...], [0...],
+	[0...], [0...], [0...], [0...], [0...], [0...], [0...], [0...], [0...],
+	[0...], [0...]];
+let dirlens: [MAXDIRS]size = [0...];
+let ndirs: size = 0;
+
 // A command line with an alias put in it.
 let expbuf: [EXPMAX]u8 = [0...];
 
@@ -63,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [50]entry = [
+const MANUAL: [68]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -114,6 +127,24 @@ const MANUAL: [50]entry = [
 	entry { name = "wc", help = "count the lines, words and bytes", builtin = false , paths = true },
 	entry { name = "grep", help = "print the lines that hold a pattern", builtin = false , paths = true },
 	entry { name = "cp", help = "copy a file", builtin = false , paths = true },
+	entry { name = "mv", help = "move a file", builtin = false , paths = true },
+	entry { name = "nl", help = "number the lines of a file", builtin = false , paths = true },
+	entry { name = "cut", help = "take parts of each line", builtin = false , paths = true },
+	entry { name = "paste", help = "put files side by side", builtin = false , paths = true },
+	entry { name = "comm", help = "the lines two files have in common", builtin = false , paths = true },
+	entry { name = "diff", help = "what is different between two files", builtin = false , paths = true },
+	entry { name = "od", help = "dump a file in octal and hex", builtin = false , paths = true },
+	entry { name = "strings", help = "the printable parts of a file", builtin = false , paths = true },
+	entry { name = "cksum", help = "a checksum of a file", builtin = false , paths = true },
+	entry { name = "file", help = "say what a file is", builtin = false , paths = true },
+	entry { name = "uname", help = "the machine this is", builtin = false , paths = false },
+	entry { name = "id", help = "which process this is", builtin = false , paths = false },
+	entry { name = "split", help = "split a file into pieces", builtin = false , paths = true },
+	entry { name = "ps", help = "the processes that are running", builtin = false , paths = false },
+	entry { name = "kill", help = "stop a process", builtin = false , paths = false },
+	entry { name = "type", help = "say what a command is", builtin = true , paths = false },
+	entry { name = "pushd", help = "remember a directory and move", builtin = true , paths = true },
+	entry { name = "popd", help = "go back to a remembered directory", builtin = true , paths = false },
 ];
 
 fn load_bin() void = {
@@ -314,8 +345,14 @@ fn run_line(line: []u8) bool = {
 		run_cat(expand_glob(rest));
 	} else if (str_eq(cmd, "cd")) {
 		run_cd(rest);
+	} else if (str_eq(cmd, "pushd")) {
+		run_pushd(rest);
+	} else if (str_eq(cmd, "popd")) {
+		run_popd();
 	} else if (str_eq(cmd, "pwd")) {
 		rt::println(rt::getcwd());
+	} else if (str_eq(cmd, "type")) {
+		run_type(rest);
 	} else if (str_eq(cmd, "clear")) {
 		out("\x1b[2J\x1b[H");
 	} else if (str_eq(cmd, "env")) {
@@ -507,16 +544,100 @@ fn run_cat(rest: []u8) void = {
 
 // Moves to another directory. With no name it goes back to the top.
 fn run_cd(rest: []u8) void = {
+	// With no name it goes back to the top, and with a dash it goes back
+	// to where it was before.
 	if (len(rest) == 0) {
-		if (!rt::chdir("/")) {
-			rt::println("cd: cannot go to /");
-		};
+		do_cd("/");
 		return;
 	};
-	if (!rt::chdir(*(&rest: *str))) {
-		rt::print("cd: no such directory: ");
-		rt::println(*(&rest: *str));
+	if (len(rest) == 1 && rest[0] == ('-': u8)) {
+		if (prevlen == 0) {
+			rt::println("cd: no previous directory");
+			return;
+		};
+		do_cd(*(&prevdir[..prevlen]: *str));
+		return;
 	};
+	do_cd(*(&rest: *str));
+};
+
+// Moves to a directory, remembering where it was.
+fn do_cd(path: str) void = {
+	// Where it is now, so that a dash can go back to it.
+	const here = rt::getcwd();
+	const hb = *(&here: *[]u8);
+	prevlen = 0;
+	for (let i = 0z; i < len(hb) && i < len(prevdir); i += 1) {
+		prevdir[i] = hb[i];
+		prevlen = i + 1;
+	};
+	if (!rt::chdir(path)) {
+		rt::print("cd: no such directory: ");
+		rt::println(path);
+	};
+};
+
+// Puts the directory it is in on a stack and moves somewhere else.
+fn run_pushd(rest: []u8) void = {
+	if (len(rest) == 0) {
+		rt::println("usage: pushd <path>");
+		return;
+	};
+	if (ndirs >= MAXDIRS) {
+		rt::println("pushd: the stack is full");
+		return;
+	};
+	const here = rt::getcwd();
+	const hb = *(&here: *[]u8);
+	let n = 0z;
+	for (let i = 0z; i < len(hb) && n + 1 < len(dirstack[ndirs]); i += 1) {
+		dirstack[ndirs][n] = hb[i];
+		n += 1;
+	};
+	dirlens[ndirs] = n;
+	ndirs += 1;
+	do_cd(*(&rest: *str));
+	rt::println(*(&dirstack[ndirs - 1][..dirlens[ndirs - 1]]: *str));
+};
+
+// Takes the last directory off the stack and goes back to it.
+fn run_popd() void = {
+	if (ndirs == 0) {
+		rt::println("popd: the stack is empty");
+		return;
+	};
+	ndirs -= 1;
+	const p = *(&dirstack[ndirs][..dirlens[ndirs]]: *str);
+	do_cd(p);
+	rt::println(p);
+};
+
+// What a command is: a command of the shell, a program, or a file.
+fn run_type(rest: []u8) void = {
+	if (len(rest) == 0) {
+		rt::println("usage: type <command>");
+		return;
+	};
+	const sp = lib::first_space(rest);
+	const cmd = rest[..sp];
+	const i = manual_find(cmd);
+	if (i != NOFOUND && MANUAL[i].builtin) {
+		rt::write(cmd);
+		rt::println(": a command of the shell");
+		return;
+	};
+	if (is_extprog(cmd)) {
+		rt::write(cmd);
+		rt::println(": a program, in /bin");
+		return;
+	};
+	if (rt::exists(*(&cmd: *str))) {
+		rt::write(cmd);
+		rt::println(": a file");
+		return;
+	};
+	rt::print("type: not found: ");
+	rt::println(*(&cmd: *str));
 };
 
 // The environment, one variable to a line.

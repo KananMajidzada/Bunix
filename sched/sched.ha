@@ -25,7 +25,14 @@ export type thread = struct {
 	// the window it was started in, so a program left running in one window
 	// does not paint over another one that is merely being looked at.
 	win: size,
+	// The command the thread was started with, so that ps can say what it
+	// is doing.
+	cmd: [64]u8,
+	cmdlen: size,
 	alive: bool,
+	// Whether what the thread was using has been given back already, so
+	// that it is not given back twice.
+	cleaned: bool,
 };
 
 // Where the FPU and SSE state of each thread is parked across a switch. The
@@ -64,7 +71,8 @@ fn thread_fpu(i: size) uintptr = {
 
 let threads: [MAXTHREADS]thread = [thread {
 	id = 0, stack = 0, kernel = 0, frame = 0,
-	space = 0, heap = 0, heap_end = 0, fpu = 0, win = 0, alive = false,
+	space = 0, heap = 0, heap_end = 0, fpu = 0, win = 0,
+	cmd = [0...], cmdlen = 0, alive = false, cleaned = false,
 }...];
 
 let nthreads: size = 0;
@@ -74,11 +82,28 @@ let current: size = 0;
 export let reap_hook: nullable *fn(id: size) void = null;
 
 fn call_reap() void = {
+	reap(threads[current].id: size);
+};
+
+// Tells the modules that a thread has gone, so that they can let go of what
+// was its own.
+fn reap(id: size) void = {
 	match (reap_hook) {
 	case null => void;
 	case let f: *fn(id: size) void =>
-		f(threads[current].id: size);
+		f(id);
 	};
+};
+
+// Gives back what a dead thread was using. It is only done once, so that a
+// thread that is killed and then faults does not have its space freed twice.
+fn cleanup(id: size) void = {
+	if (threads[id].cleaned) {
+		return;
+	};
+	threads[id].cleaned = true;
+	free_user(id);
+	reap(threads[id].id: size);
 };
 
 // Returns a dead user thread's kernel stack, heap, address space, and all
@@ -102,7 +127,8 @@ export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
 		space = 0, heap = 0, heap_end = 0,
-		fpu = thread_fpu(0), win = 0, alive = true,
+		fpu = thread_fpu(0), win = 0,
+		cmd = [0...], cmdlen = 0, alive = true, cleaned = false,
 	};
 	nthreads = 1;
 	current = 0;
@@ -227,6 +253,81 @@ fn clear_input(t: size) void = {
 	incount[t] = 0;
 };
 
+// Remembers the command a thread was started with, so that ps can say what
+// it is doing.
+export fn set_cmd(id: size, cmd: []u8) void = {
+	if (id >= MAXTHREADS) {
+		return;
+	};
+	let n = len(cmd);
+	if (n > len(threads[id].cmd)) {
+		n = len(threads[id].cmd);
+	};
+	for (let i = 0z; i < n; i += 1) {
+		threads[id].cmd[i] = cmd[i];
+	};
+	threads[id].cmdlen = n;
+};
+
+// The processes that are running, one per line: the number of the process
+// and the command it was started with.
+export fn list(buf: []u8) size = {
+	let n = 0z;
+	for (let i = 0z; i < nthreads; i += 1) {
+		if (!threads[i].alive) {
+			continue;
+		};
+		n += put_num(buf[n..], threads[i].id);
+		if (n < len(buf)) {
+			buf[n] = ' ': u8;
+			n += 1;
+		};
+		for (let j = 0z; j < threads[i].cmdlen && n < len(buf); j += 1) {
+			buf[n] = threads[i].cmd[j];
+			n += 1;
+		};
+		if (n < len(buf)) {
+			buf[n] = '\n': u8;
+			n += 1;
+		};
+	};
+	return n;
+};
+
+// Stops a process. The one doing the killing is left to stop on its own:
+// what it is standing in cannot be taken away while it is in it.
+export fn kill(id: size) bool = {
+	if (id >= nthreads || !threads[id].alive) {
+		return false;
+	};
+	threads[id].alive = false;
+	cleanup(id);
+	return true;
+};
+
+// A number written into a buffer, in decimal.
+fn put_num(buf: []u8, v: u64) size = {
+	let tmp: [20]u8 = [0...];
+	let k = len(tmp);
+	if (v == 0) {
+		k -= 1;
+		tmp[k] = '0': u8;
+	} else {
+		let n = v;
+		for (n > 0) {
+			k -= 1;
+			tmp[k] = ('0': u8) + (n % 10): u8;
+			n /= 10;
+		};
+	};
+	let out = 0z;
+	for (let i = k; i < len(tmp) && out < len(buf); i += 1) {
+		buf[out] = tmp[i];
+		out += 1;
+	};
+	return out;
+};
+
 export fn count() size = nthreads;
 
 export fn live() size = {
@@ -249,8 +350,7 @@ export fn retire() void = {
 	if (wi < MAXWIN && win_fg[wi] == current) {
 		win_fg[wi] = MAXWIN;
 	};
-	free_user(current);
-	call_reap();
+	cleanup(current);
 };
 
 fn put(fp: uintptr, off: uintptr, v: u64) void = {
@@ -304,7 +404,10 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		heap_end = 0,
 		fpu = save,
 		win = w,
+		cmd = [0...],
+		cmdlen = 0,
 		alive = true,
+		cleaned = false,
 	};
 	if (w < MAXWIN) {
 		win_fg[w] = id;
@@ -432,7 +535,6 @@ export fn tick(regs: *architecture::registers) uintptr = {
 // Terminates the running thread after a fault and returns the next frame.
 export fn fault_kill() uintptr = {
 	threads[current].alive = false;
-	free_user(current);
-	call_reap();
+	cleanup(current);
 	return pick_next();
 };
