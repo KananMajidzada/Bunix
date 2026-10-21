@@ -51,26 +51,70 @@ export fn str_eq(a: []u8, b: []u8) bool = {
 // The most words a command line is broken into.
 export def MAXWORDS: size = 16;
 
-// Splits a command line into words, on runs of spaces and tabs. The words
-// point into the line, so the line has to outlive them.
+// How long a word can be.
+export def WORDLEN: size = 512;
+
+// The words of the last line that was split. The words point here, and not
+// into the line, because the quotes are taken off them and the line they
+// came from still has the quotes in it.
+let wordbuf: [MAXWORDS][WORDLEN]u8 = [[0...], [0...], [0...], [0...],
+	[0...], [0...], [0...], [0...], [0...], [0...], [0...], [0...],
+	[0...], [0...], [0...], [0...]];
+
+// Splits a command line into words, on runs of spaces and tabs. A word can
+// be in quotes, and the quotes are taken off it, so that a word can hold
+// spaces in it. The words point into a buffer of their own, so the line
+// does not have to outlive them, and one line can be split over again.
 export fn split(b: []u8, words: *[MAXWORDS][]u8) size = {
 	let n = 0z;
 	let i = 0z;
+	let quote = 0u8;
 	for (true) {
-		for (i < len(b) && (b[i] == (' ': u8) || b[i] == ('\t': u8))) {
+		// The spaces between the words are not part of a word.
+		for (i < len(b) && quote == 0
+				&& (b[i] == (' ': u8) || b[i] == ('\t': u8))) {
 			i += 1;
 		};
-		if (i >= len(b)) {
+		if (i >= len(b) || n >= MAXWORDS) {
 			break;
 		};
-		const start = i;
-		for (i < len(b) && b[i] != (' ': u8) && b[i] != ('\t': u8)) {
+		// The word is put in the buffer of its own, with the quotes off.
+		let w = 0z;
+		for (true) {
+			if (i >= len(b)) {
+				break;
+			};
+			const c = b[i];
+			if (quote != 0) {
+				// Inside the quotes everything is part of the word,
+				// up to the quote that ends them.
+				if (c == quote) {
+					quote = 0;
+					i += 1;
+					continue;
+				};
+				if (w < WORDLEN) {
+					wordbuf[n][w] = c;
+					w += 1;
+				};
+				i += 1;
+				continue;
+			};
+			if (c == ('"': u8) || c == ('\'': u8)) {
+				quote = c;
+				i += 1;
+				continue;
+			};
+			if (c == (' ': u8) || c == ('\t': u8)) {
+				break;
+			};
+			if (w < WORDLEN) {
+				wordbuf[n][w] = c;
+				w += 1;
+			};
 			i += 1;
 		};
-		if (n >= MAXWORDS) {
-			break;
-		};
-		words[n] = b[start..i];
+		words[n] = wordbuf[n][..w];
 		n += 1;
 	};
 	return n;

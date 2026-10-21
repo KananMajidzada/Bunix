@@ -76,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [68]entry = [
+const MANUAL: [70]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -108,11 +108,12 @@ const MANUAL: [68]entry = [
 	entry { name = "help", help = "say what can be done", builtin = true , paths = false },
 	entry { name = "exit", help = "leave the shell", builtin = true , paths = false },
 	entry { name = "halt", help = "stop the machine", builtin = true , paths = false },
-	entry { name = "sort", help = "sort the lines of a file", builtin = false , paths = true },
+	entry { name = "poweroff", help = "stop the machine", builtin = true , paths = false },
+	entry { name = "sort", help = "sort the lines: -n numbers, -r back, -u one of each", builtin = false , paths = true },
 	entry { name = "uniq", help = "drop the lines that repeat", builtin = false , paths = true },
-	entry { name = "head", help = "the first lines of a file", builtin = false , paths = true },
-	entry { name = "tail", help = "the last lines of a file", builtin = false , paths = true },
-	entry { name = "tr", help = "translate the characters of a file", builtin = false , paths = true },
+	entry { name = "head", help = "the first lines: -n N or -N", builtin = false , paths = true },
+	entry { name = "tail", help = "the last lines: -n N or -N", builtin = false , paths = true },
+	entry { name = "tr", help = "translate characters, as in a-z, or -d to drop", builtin = false , paths = true },
 	entry { name = "rev", help = "turn the lines of a file around", builtin = false , paths = true },
 	entry { name = "seq", help = "print a run of numbers", builtin = false , paths = false },
 	entry { name = "expr", help = "do arithmetic", builtin = false , paths = false },
@@ -122,16 +123,16 @@ const MANUAL: [68]entry = [
 	entry { name = "du", help = "say how big a tree is", builtin = false , paths = true },
 	entry { name = "df", help = "say how much room is left", builtin = false , paths = false },
 	entry { name = "test", help = "ask about a path", builtin = false , paths = true },
-	entry { name = "find", help = "look for a name in a tree", builtin = false , paths = true },
+	entry { name = "find", help = "look for a name in a tree: -name pattern", builtin = false , paths = true },
 	entry { name = "tree", help = "print a tree", builtin = false , paths = true },
-	entry { name = "wc", help = "count the lines, words and bytes", builtin = false , paths = true },
-	entry { name = "grep", help = "print the lines that hold a pattern", builtin = false , paths = true },
-	entry { name = "cp", help = "copy a file", builtin = false , paths = true },
+	entry { name = "wc", help = "count lines, words and bytes: -l -w -c", builtin = false , paths = true },
+	entry { name = "grep", help = "print lines holding a pattern: -i -v -n -c", builtin = false , paths = true },
+	entry { name = "cp", help = "copy: -r a tree, or many files to a directory", builtin = false , paths = true },
 	entry { name = "mv", help = "move a file", builtin = false , paths = true },
 	entry { name = "nl", help = "number the lines of a file", builtin = false , paths = true },
 	entry { name = "cut", help = "take parts of each line", builtin = false , paths = true },
 	entry { name = "paste", help = "put files side by side", builtin = false , paths = true },
-	entry { name = "comm", help = "the lines two files have in common", builtin = false , paths = true },
+	entry { name = "comm", help = "three columns of two sorted files: -1 -2 -3", builtin = false , paths = true },
 	entry { name = "diff", help = "what is different between two files", builtin = false , paths = true },
 	entry { name = "od", help = "dump a file in octal and hex", builtin = false , paths = true },
 	entry { name = "strings", help = "the printable parts of a file", builtin = false , paths = true },
@@ -139,9 +140,10 @@ const MANUAL: [68]entry = [
 	entry { name = "file", help = "say what a file is", builtin = false , paths = true },
 	entry { name = "uname", help = "the machine this is", builtin = false , paths = false },
 	entry { name = "id", help = "which process this is", builtin = false , paths = false },
-	entry { name = "split", help = "split a file into pieces", builtin = false , paths = true },
+	entry { name = "split", help = "split a file into pieces: -l lines, a name", builtin = false , paths = true },
 	entry { name = "ps", help = "the processes that are running", builtin = false , paths = false },
 	entry { name = "kill", help = "stop a process", builtin = false , paths = false },
+	entry { name = "install", help = "put Bunix on a disk", builtin = false , paths = false },
 	entry { name = "type", help = "say what a command is", builtin = true , paths = false },
 	entry { name = "pushd", help = "remember a directory and move", builtin = true , paths = true },
 	entry { name = "popd", help = "go back to a remembered directory", builtin = true , paths = false },
@@ -373,16 +375,138 @@ fn strip_quotes(word: str) str = {
 fn run_line(line: []u8) bool = {
 	hist_add(line);
 	const expanded = expand_alias(line);
+	return run_pipe(expanded, expanded[0..0], 0);
+};
+
+def MAXPIPE: size = 8;
+const NOBAR: size = ~0z;
+
+// Runs a line that may be a pipeline. A pipe is a file: the command on the
+// left writes to a file of its own, and the command on the right is given
+// that file, so that the left one has finished before the right one starts.
+// That is not what a pipe does on a system where the two run at once, but
+// the file is real and the filters work.
+fn run_pipe(line: []u8, input: []u8, depth: size) bool = {
+	const bar = find_bar(line);
+	if (bar == NOBAR) {
+		if (len(input) == 0) {
+			return run_one(line);
+		};
+		// The command is given the file the one before it wrote.
+		let buf: [512]u8 = [0...];
+		const n = put_input(buf[..], line, input);
+		return run_one(buf[..n]);
+	};
+	if (depth >= MAXPIPE) {
+		rt::println("too many pipes");
+		return true;
+	};
+	const left = line[..bar];
+	let right = line[bar + 1..];
+	// The spaces after the pipe are not the name of a command.
+	for (len(right) > 0 && (right[0] == (' ': u8) || right[0] == ('\t': u8))) {
+		right = right[1..];
+	};
+	// Each pipe has a file of its own, so that a line with more than one
+	// pipe in it does not write over what it is reading.
+	let name: [24]u8 = [0...];
+	const pn = pipe_name(name[..], depth);
+	if (!rt::redirect(*(&name[..pn]: *str), false)) {
+		rt::println("cannot make the pipe");
+		return true;
+	};
+	const ok = run_pipe(left, input, depth);
+	rt::redirect("", false);
+	const more = run_pipe(right, name[..pn], depth + 1);
+	_ = rt::remove(*(&name[..pn]: *str));
+	return ok && more;
+};
+
+// Where the pipe between two commands is, or NOBAR when there is none. A
+// pipe in quotes is part of a word, and not a pipe.
+fn find_bar(line: []u8) size = {
+	let quote = 0u8;
+	for (let i = 0z; i < len(line); i += 1) {
+		const c = line[i];
+		if (quote != 0) {
+			if (c == quote) {
+				quote = 0;
+			};
+			continue;
+		};
+		if (c == ('"': u8) || c == ('\'': u8)) {
+			quote = c;
+			continue;
+		};
+		if (c == ('|': u8)) {
+			return i;
+		};
+	};
+	return NOBAR;
+};
+
+// The name of the file a command in a pipeline writes to. It is a file like
+// any other, and it sits with the other files the system makes for itself.
+fn pipe_name(buf: []u8, depth: size) size = {
+	const prefix = *(&"/dev/pipe": *[]u8);
+	let n = 0z;
+	for (let i = 0z; i < len(prefix) && n < len(buf); i += 1) {
+		buf[n] = prefix[i];
+		n += 1;
+	};
+	if (n < len(buf)) {
+		const d: u8 = (depth % 10): u8;
+		buf[n] = ('0': u8) + d;
+		n += 1;
+	};
+	return n;
+};
+
+// A line with the file a command is given put in it. The file goes before
+// a >, so that the name of the file the output goes to is still taken for
+// the name of the file, and not for another argument.
+fn put_input(buf: []u8, line: []u8, input: []u8) size = {
+	let r = redirect { mark = 0, add = false };
+	let cut = len(line);
+	if (find_redirect(line, &r) && r.mark != 0) {
+		cut = r.mark;
+	};
+	let n = 0z;
+	for (let i = 0z; i < cut && n < len(buf); i += 1) {
+		buf[n] = line[i];
+		n += 1;
+	};
+	if (n < len(buf)) {
+		buf[n] = (' ': u8);
+		n += 1;
+	};
+	for (let i = 0z; i < len(input) && n < len(buf); i += 1) {
+		buf[n] = input[i];
+		n += 1;
+	};
+	if (cut < len(line) && n < len(buf)) {
+		buf[n] = (' ': u8);
+		n += 1;
+	};
+	for (let i = cut; i < len(line) && n < len(buf); i += 1) {
+		buf[n] = line[i];
+		n += 1;
+	};
+	return n;
+};
+
+// Runs one command, and sends its output to a file when it was told to.
+fn run_one(line: []u8) bool = {
 	// The output of the command may be sent to a file instead of the
 	// screen. The mark is looked for before the command is run, so that
 	// the file is made even when the command itself is not there.
 	let r = redirect { mark = 0, add = false };
-	if (!find_redirect(expanded, &r) || r.mark == 0) {
-		return run_command(expanded);
+	if (!find_redirect(line, &r) || r.mark == 0) {
+		return run_command(line);
 	};
 	// The name of the file is what is left, without the spaces around it.
 	const skip: size = if (r.add) 2 else 1;
-	let name = expanded[r.mark + skip..];
+	let name = line[r.mark + skip..];
 	let start = 0z;
 	for (let i = 0z; i < len(name); i += 1) {
 		if (name[i] != (' ': u8) && name[i] != ('\t': u8)) {
@@ -407,7 +531,7 @@ fn run_line(line: []u8) bool = {
 		rt::println(path);
 		return true;
 	};
-	const ok = run_command(expanded[..r.mark]);
+	const ok = run_command(line[..r.mark]);
 	// The output goes back to the screen.
 	rt::redirect("", false);
 	return ok;
@@ -418,6 +542,11 @@ fn run_command(line: []u8) bool = {
 	const sp = lib::first_space(line);
 	const cmd = line[..sp];
 	const rest = if (sp < len(line)) line[sp + 1..] else line[0..0];
+	// A line with nothing to run on it, as when a pipe has nothing after
+	// it, is not a command that could not be found.
+	if (len(cmd) == 0) {
+		return true;
+	};
 	if (str_eq(cmd, "exit")) {
 		rt::println("bye");
 		return false;
@@ -427,7 +556,21 @@ fn run_command(line: []u8) bool = {
 		const vp: str = "/proc/version";
 		run_cat(*(&vp: *[]u8));
 	} else if (str_eq(cmd, "echo")) {
-		rt::write(rest);
+		// The spaces at the end are not part of what is said, which
+		// matters when the line was cut where a > began.
+		let end = len(rest);
+		for (end > 0 && (rest[end - 1] == (' ': u8)
+				|| rest[end - 1] == ('\t': u8))) {
+			end -= 1;
+		};
+		let said = rest[..end];
+		// Quotes around the whole of it are not part of what is said.
+		if (len(said) >= 2 && ((said[0] == ('"': u8)
+				&& said[len(said) - 1] == ('"': u8))
+				|| (said[0] == 39 && said[len(said) - 1] == 39))) {
+			said = said[1..len(said) - 1];
+		};
+		rt::write(said);
 		rt::println("");
 	} else if (str_eq(cmd, "cat")) {
 		run_cat(expand_glob(rest));
@@ -893,6 +1036,9 @@ fn run_help() void = {
 	help_extprog();
 	rt::println("The up and down arrows walk the history, and the left and");
 	rt::println("right arrows move along the line.");
+	rt::println("A > at the end of a line sends the output to a file, and a");
+	rt::println(">> adds to what is already in it. A | sends it to a file the");
+	rt::println("command after the | is given, as in cat /tmp/x | wc -l.");
 };
 
 // Waits for a number of seconds.
@@ -1008,13 +1154,36 @@ fn run_write(rest: []u8) void = {
 			body = body[1..];
 		};
 	};
-	const w = lib::first_space(body);
-	if (w == len(body)) {
+	// The path is the first word of the line, and it can be in quotes so
+	// that it can hold spaces in it.
+	let path: []u8 = body[0..0];
+	let raw: []u8 = body[0..0];
+	if (len(body) > 0 && (body[0] == ('"': u8) || body[0] == 39)) {
+		const q = body[0];
+		let i = 1z;
+		for (i < len(body) && body[i] != q) {
+			i += 1;
+		};
+		path = body[1..i];
+		// What is left is the text, without the space in front of it.
+		let j = i + 1;
+		for (j < len(body) && (body[j] == (' ': u8) || body[j] == ('\t': u8))) {
+			j += 1;
+		};
+		raw = body[j..];
+	} else {
+		const w = lib::first_space(body);
+		if (w == len(body)) {
+			rt::println("usage: write [-a] <path> <text>");
+			return;
+		};
+		path = body[..w];
+		raw = body[w + 1..];
+	};
+	if (len(path) == 0) {
 		rt::println("usage: write [-a] <path> <text>");
 		return;
 	};
-	const path = body[..w];
-	let raw = body[w + 1..];
 	if (len(raw) >= 2) {
 		const db = *(&raw: *[]u8);
 		if ((db[0] == ('"': u8) && db[len(db) - 1] == ('"': u8))
@@ -1343,19 +1512,13 @@ fn expand_glob(line: []u8) []u8 = {
 			out += 1;
 		};
 		if (!lib::has_star(w)) {
-			for (let j = 0z; j < len(w) && out < len(globbuf); j += 1) {
-				globbuf[out] = w[j];
-				out += 1;
-			};
+			out += put_word(globbuf[out..], w);
 			continue;
 		};
 		const cnt = glob_one(w);
 		if (cnt == 0) {
 			// Nothing matched, so the word stays as it was.
-			for (let j = 0z; j < len(w) && out < len(globbuf); j += 1) {
-				globbuf[out] = w[j];
-				out += 1;
-			};
+			out += put_word(globbuf[out..], w);
 			continue;
 		};
 		for (let j = 0z; j < cnt && out < len(globbuf); j += 1) {
@@ -1368,6 +1531,31 @@ fn expand_glob(line: []u8) []u8 = {
 		return line;
 	};
 	return globbuf[..out];
+};
+
+// A word put into a buffer, with quotes around it when it holds spaces, so
+// that it is still one word when the line is split again.
+fn put_word(buf: []u8, w: []u8) size = {
+	let space = false;
+	for (let j = 0z; j < len(w); j += 1) {
+		if (w[j] == (' ': u8) || w[j] == ('\t': u8)) {
+			space = true;
+		};
+	};
+	let n = 0z;
+	if (space && n < len(buf)) {
+		buf[n] = ('"': u8);
+		n += 1;
+	};
+	for (let j = 0z; j < len(w) && n < len(buf); j += 1) {
+		buf[n] = w[j];
+		n += 1;
+	};
+	if (space && n < len(buf)) {
+		buf[n] = ('"': u8);
+		n += 1;
+	};
+	return n;
 };
 
 // The names in a directory that match a pattern, written into namesbuf. The
