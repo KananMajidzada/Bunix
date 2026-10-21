@@ -2,48 +2,99 @@ use lib;
 use posix;
 use rt;
 
-// Print every line of a file that holds a pattern.
+const I_FLAG: str = "-i";
+
+let patbuf: [512]u8 = [0...];
+let linebuf: [512]u8 = [0...];
+
+// Print every line of a file that holds a pattern. With -i the pattern is
+// matched without regard to case.
 export @symbol("main") fn main() void = {
 	const a = rt::arg();
-	const rest = *(&a: *[]u8);
-	const sp = lib::first_space(rest);
-	if (sp == len(rest)) {
-		rt::println("usage: grep <pattern> <path>");
-		return;
-	};
-	const pat = rest[..sp];
-	const path = rest[sp + 1..];
-	const fd = posix::open(*(&path: *str), posix::O_RDONLY);
-	if (fd < 0) {
-		rt::println("grep: cannot open");
-		return;
-	};
-	let buf: [512]u8 = [0...];
-	let line: [512]u8 = [0...];
-	let nl = 0z;
-	for (true) {
-		const n = posix::read(fd, buf[..]);
-		if (n == 0) {
-			if (nl > 0 && lib::contains(line[..nl], pat)) {
-				rt::write(line[..nl]);
-				rt::println("");
-			};
-			break;
+	const arg = *(&a: *[]u8);
+	let words: [lib::MAXWORDS][]u8 = [[]...];
+	const n = lib::split(arg, &words);
+	let icase = false;
+	let pos: [lib::MAXWORDS][]u8 = [[]...];
+	let npos = 0z;
+	for (let i = 0z; i < n; i += 1) {
+		const w = words[i];
+		if (lib::str_eq(w, *(&I_FLAG: *[]u8))) {
+			icase = true;
+			continue;
 		};
-		for (let i = 0z; i < n; i += 1) {
-			line[nl] = buf[i];
-			const eol = buf[i] == ('\n': u8);
-			if (!eol) {
-				nl += 1;
-			};
-			if (eol || nl == len(line)) {
-				if (lib::contains(line[..nl], pat)) {
+		if (npos < lib::MAXWORDS) {
+			pos[npos] = w;
+			npos += 1;
+		};
+	};
+	if (npos < 2) {
+		rt::println("usage: grep [-i] <pattern> <path>...");
+		return;
+	};
+	// The pattern is folded once, so every line is compared against the
+	// same thing.
+	const pat = pos[0];
+	let fpat = pat;
+	if (icase) {
+		fpat = patbuf[..fold(pat, patbuf)];
+	};
+	for (let i = 1z; i < npos; i += 1) {
+		const path = pos[i];
+		const fd = posix::open(*(&path: *str), posix::O_RDONLY);
+		if (fd < 0) {
+			rt::print("grep: cannot open ");
+			rt::println(*(&path: *str));
+			continue;
+		};
+		let buf: [512]u8 = [0...];
+		let line: [512]u8 = [0...];
+		let nl = 0z;
+		for (true) {
+			const k = posix::read(fd, buf[..]);
+			if (k == 0) {
+				if (nl > 0 && holds(line[..nl], pat, fpat, icase)) {
 					rt::write(line[..nl]);
 					rt::println("");
 				};
-				nl = 0;
+				break;
+			};
+			for (let j = 0z; j < k; j += 1) {
+				line[nl] = buf[j];
+				const eol = buf[j] == ('\n': u8);
+				if (!eol) {
+					nl += 1;
+				};
+				if (eol || nl == len(line)) {
+					if (holds(line[..nl], pat, fpat, icase)) {
+						rt::write(line[..nl]);
+						rt::println("");
+					};
+					nl = 0;
+				};
 			};
 		};
+		posix::close(fd);
 	};
-	posix::close(fd);
+};
+
+// Whether a line holds the pattern. The folded copy of the pattern is only
+// there when the case is being ignored.
+fn holds(line: []u8, pat: []u8, fpat: []u8, icase: bool) bool = {
+	if (icase) {
+		return lib::contains(linebuf[..fold(line, linebuf)], fpat);
+	};
+	return lib::contains(line, pat);
+};
+
+// A copy of the bytes in lower case, so a pattern can be matched against
+// them whatever case they were written in.
+fn fold(b: []u8, out: []u8) size = {
+	let n = 0z;
+	for (let i = 0z; i < len(b) && n < len(out); i += 1) {
+		const c = b[i];
+		out[n] = if (c >= ('A': u8) && c <= ('Z': u8)) c + 32 else c;
+		n += 1;
+	};
+	return n;
 };

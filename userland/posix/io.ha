@@ -244,18 +244,18 @@ export fn strcpy(dst: *u8, src: *const u8) *u8 = {
 };
 
 export fn getcwd(buf: *u8, nsize: size) *u8 = {
-	const cwd: str = "/";
-	const cwd_bytes = *(&cwd: *[]u8);
+	const cwd = rt::getcwd();
+	const cb = *(&cwd: *[]u8);
 	const pb = (buf: uintptr): *[*]u8;
-	let n = len(cwd_bytes);
+	let n = len(cb);
 	if (n >= nsize) { n = nsize - 1; };
-	for (let i = 0z; i < n; i += 1) { pb[i] = cwd_bytes[i]; };
+	for (let i = 0z; i < n; i += 1) { pb[i] = cb[i]; };
 	pb[n] = 0;
 	return buf;
 };
 
 export fn chdir(path: *const u8) int = {
-	return 0;
+	return if (rt::chdir(*(&path: *str))) 0 else -1;
 };
 
 export fn mkdir(path: *const u8, mode: int) int = {

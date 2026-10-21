@@ -108,6 +108,18 @@ rt.sys_screen:
 	int $0x80
 	ret
 
+.global rt.sys_chdir
+rt.sys_chdir:
+	movq $18, %rax
+	int $0x80
+	ret
+
+.global rt.sys_pwd
+rt.sys_pwd:
+	movq $19, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

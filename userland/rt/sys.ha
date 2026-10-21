@@ -31,6 +31,8 @@ type shdr = struct {
 @symbol("rt.sys_fresh") fn sys_fresh() u64;
 @symbol("rt.sys_stat") fn sys_stat(pptr: uintptr, plen: size, sizeptr: uintptr, modeptr: uintptr) u64;
 @symbol("rt.sys_screen") fn sys_screen(rowsp: uintptr, colsp: uintptr) u64;
+@symbol("rt.sys_chdir") fn sys_chdir(pptr: uintptr, plen: size) u64;
+@symbol("rt.sys_pwd") fn sys_pwd(dptr: uintptr, dlen: size) u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -138,6 +140,32 @@ export fn filesize(path: str) u64 = {
 		return 0;
 	};
 	return n;
+};
+
+// Whether a path names a directory. The size call answers with the kind
+// alongside the length, so this costs no more than asking for the size did.
+export fn isdir(path: str) bool = {
+	let n: u64 = 0;
+	let k: u32 = 0;
+	if (!stat_of(path, &n, &k)) {
+		return false;
+	};
+	return k != 0;
+};
+
+// Moves the process into a directory. A relative path is from where it
+// already is.
+export fn chdir(path: str) bool = {
+	const p = *(&path: *shdr);
+	return sys_chdir(p.data, p.length) != 0;
+};
+
+// Where the process is, as an absolute path.
+let cwdb: [512]u8 = [0...];
+
+export fn getcwd() str = {
+	const n = sys_pwd(&cwdb[0]: uintptr, len(cwdb));
+	return *(&cwdb[..n]: *str);
 };
 
 // The console size in rows and columns. The kernel's text console interprets

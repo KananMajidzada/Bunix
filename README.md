@@ -28,6 +28,44 @@ Some of what the shell knows:
 
 ![help](doc/help.png)
 
+## The shell
+
+The shell `ush` is the one you land in. It keeps a working directory, a
+history and a few aliases, and the arrow keys walk the history.
+
+	ush> cd /usr/include
+	ush> ls stdio.h
+	stdio.h
+	ush> pwd
+	/usr/include
+	ush> alias ll="ls -l"
+	ush> ll /bin
+	hello                       12392
+	wc                          21552
+	ush> history
+	1  cd /usr/include
+	2  ls stdio.h
+
+The commands of the shell itself are `cat`, `cd`, `pwd`, `echo`, `write`,
+`mkdir`, `touch`, `rm`, `hd`, `cc`, `env`, `export`, `unset`, `alias`,
+`unalias`, `history`, `which`, `man`, `uptime`, `free`, `sleep`, `clear`,
+`true`, `false`, `user`, `multi`, `version`, `help` and `exit`.
+
+The programs with an image of their own are found through `/bin` and are run
+by name: `ls`, `sort`, `uniq`, `head`, `tail`, `tr`, `rev`, `seq`, `expr`,
+`basename`, `dirname`, `stat`, `du`, `df`, `test`, `find`, `tree`, `grep`,
+`wc`, `cp`, `hello`, `cc`, `tcc` and `mei`.
+
+A name with a `*` in it is looked for, so a command that takes paths can be
+given a pattern:
+
+	ush> cd /usr/include
+	ush> ls std*.h
+	stdalign.h
+	stdarg.h
+	stdbool.h
+	...
+
 ## Build
 Needs `hare`, `qbe`, `as` and `ld` on your PATH.
 
@@ -43,3 +81,8 @@ or just `make run`. The screen you get is drawn on the framebuffer; the serial
 line carries the same text.
 
 Type `help` to see what the shell knows.
+
+To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
+
+	qemu-system-x86_64 -m 256 -kernel bunix.bin -serial stdio \
+		-drive file=disk.img,format=raw,if=ide

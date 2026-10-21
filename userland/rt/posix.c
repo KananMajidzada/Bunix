@@ -303,16 +303,18 @@ int isatty(int fd) {
 int dup(int fd) { return -1; }
 
 char *getcwd(char *buf, size_t n) {
-    // Every process sees one namespace rooted at /, so there is nowhere else
-    // to be.
-    const char *cwd = "/";
-    size_t len = strlen(cwd);
+    // The kernel knows which directory the process is in, since that is a
+    // node in the tree rather than a name it keeps.
+    char tmp[512];
+    size_t len = bunix_pwd(tmp, sizeof(tmp) - 1);
+    if (len == 0) { tmp[0] = '/'; tmp[1] = 0; len = 1; }
+    tmp[len] = 0;
     if (!buf || n < len + 1) return NULL;
-    memcpy(buf, cwd, len + 1);
+    memcpy(buf, tmp, len + 1);
     return buf;
 }
 
-int chdir(const char *path) { return 0; }
+int chdir(const char *path) { return bunix_chdir(path) ? 0 : -1; }
 
 pid_t getpid(void) { return 1; }
 

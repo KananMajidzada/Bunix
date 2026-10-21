@@ -42,10 +42,17 @@ export type node = struct {
 	disk: bool,
 	dblock: u32,
 	dlen: u32,
+	// The size of a file whose bytes are not held here, such as a program
+	// that really lives in the image folded into the kernel.
+	fsize: u64,
 };
 
 export type ns = struct {
 	root: size,
+	// The directory a relative path is taken from. Every process has one of
+	// its own, so two programs can be in different places at the same time
+	// without arguing about it.
+	cwd: size,
 	inuse: [MAXHANDLE]bool,
 	hnode: [MAXHANDLE]size,
 	owned: bool,
@@ -108,6 +115,7 @@ let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
 	content = [], gen = null, gdsk = null, writable = false, wdev = null,
 	wdsk = null, wlen = 0, wbuf = 0, wcap = 0, disk = false, dblock = 0, dlen = 0,
+	fsize = 0,
 }...];
 let nnodes: size = 0;
 let root: size = 0;
@@ -117,6 +125,7 @@ let usrroot: size = 0;
 let binroot: size = 0;
 let nss: [MAXNS]ns = [ns {
 	root = 0,
+	cwd = 0,
 	inuse = [false...],
 	hnode = [0...],
 	owned = false,
@@ -161,6 +170,7 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.disk = false;
 	nd.dblock = 0;
 	nd.dlen = 0;
+	nd.fsize = 0;
 	nused += 1;
 	return id;
 };
@@ -378,6 +388,18 @@ fn gen_mem(buf: []u8) size = {
 fn gen_self(buf: []u8) size = {
 	let n = put_str(buf, "pid ");
 	n += put_num(buf[n..], sched::running());
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
+fn gen_disk(buf: []u8) size = {
+	let n = put_str(buf, "sectors ");
+	n += put_num(buf[n..], block::nsect());
+	buf[n] = '\n': u8;
+	n += 1;
+	n += put_str(buf[n..], "drive ");
+	n += put_str(buf[n..], if (block::present_drive()) "present" else "absent");
 	buf[n] = '\n': u8;
 	n += 1;
 	return n;
@@ -690,6 +712,7 @@ export fn init() void = {
 		const nm = *(&user::programs[i].nam: *str);
 		const id = mknode(nm, false);
 		nodes[id].content = [];
+		nodes[id].fsize = user::programs[i].bytes: u64;
 		link(bin, id);
 	};
 
@@ -732,8 +755,13 @@ export fn init() void = {
 	nodes[files].gen = &gen_files;
 	link(proc, files);
 
+	const diskstat = mknode("disk", false);
+	nodes[diskstat].gen = &gen_disk;
+	link(proc, diskstat);
+
 	dmount();
 	nss[0].root = root;
+	nss[0].cwd = root;
 	sched::reap_hook = &ns_reap;
 };
 
@@ -761,8 +789,16 @@ export fn ns_install(id: size, fresh: bool) void = {
 	if (id >= MAXNS) {
 		return;
 	};
+	const base = if (fresh) ns_root_make() else root;
+	// A process that shares the tree starts where the one that started it
+	// is, so a program a shell runs sees the same directory the shell is
+	// in. A process with a tree of its own starts at the top of it, since
+	// the place the parent is in is not in that tree.
+	const parent = cur();
+	const start = if (fresh || parent.root != root) base else parent.cwd;
 	nss[id] = ns {
-		root = if (fresh) ns_root_make() else root,
+		root = base,
+		cwd = start,
 		inuse = [false...],
 		hnode = [0...],
 		owned = fresh,
@@ -785,6 +821,7 @@ export fn ns_reap(id: size) void = {
 	free_node(r);
 	nss[id] = ns {
 		root = 0,
+		cwd = 0,
 		inuse = [false...],
 		hnode = [0...],
 		owned = false,
@@ -865,12 +902,157 @@ export fn list_path(path: str) []u8 = {
 	return listdir(id);
 };
 
+// A path is at most this long. The tree is shallow and the names are short,
+// so anything longer is a mistake rather than a path.
+def PATHMAX: size = 512;
+// The deepest a path can be before the segments have to be given up on.
+def MAXSEG: size = 32;
+
+let pathbuf: [PATHMAX]u8 = [0...];
+let joinbuf: [PATHMAX]u8 = [0...];
+let normbuf: [PATHMAX]u8 = [0...];
+
+// The absolute path of a node, found by walking up the tree. The parent of a
+// node is found by scanning, which is slow, but a path is asked for rarely:
+// only when a program asks where it is.
+fn path_of(id: size) str = {
+	if (id >= MAXNODE) {
+		return "/";
+	};
+	let chain: [MAXSEG]size = [0...];
+	let n = 0z;
+	let cur = id;
+	for (let i = 0z; i < MAXSEG; i += 1) {
+		chain[n] = cur;
+		n += 1;
+		if (cur == root) {
+			break;
+		};
+		const p = dfind_parent(cur);
+		if (p == NOCHILD) {
+			break;
+		};
+		cur = p;
+	};
+	let out = 0z;
+	pathbuf[0] = ('/': u8);
+	out = 1;
+	for (let i = n; i > 0; i -= 1) {
+		const c = chain[i - 1];
+		if (c == root) {
+			continue;
+		};
+		const nd = &nodes[c];
+		for (let j = 0z; j < nd.nlen && out + 1 < PATHMAX; j += 1) {
+			pathbuf[out] = nd.nam[j];
+			out += 1;
+		};
+		pathbuf[out] = ('/': u8);
+		out += 1;
+	};
+	if (out > 1) {
+		out -= 1;
+	};
+	return *(&pathbuf[..out]: *str);
+};
+
+// Folds "." and ".." out of an absolute path.
+fn normalize(src: []u8) str = {
+	normbuf[0] = ('/': u8);
+	let n = 1z;
+	// Where each segment of the path starts, so ".." can take the last one
+	// off again.
+	let seg: [MAXSEG]size = [0...];
+	let nseg = 0z;
+	let i = 0z;
+	if (len(src) > 0 && src[0] == ('/': u8)) {
+		i = 1;
+	};
+	for (true) {
+		if (i >= len(src)) {
+			break;
+		};
+		const start = i;
+		for (i < len(src) && src[i] != ('/': u8)) {
+			i += 1;
+		};
+		const seglen = i - start;
+		for (i < len(src) && src[i] == ('/': u8)) {
+			i += 1;
+		};
+		if (seglen == 0) {
+			continue;
+		};
+		if (seglen == 1 && src[start] == ('.': u8)) {
+			continue;
+		};
+		if (seglen == 2 && src[start] == ('.': u8) && src[start + 1] == ('.': u8)) {
+			if (nseg > 0) {
+				nseg -= 1;
+				n = seg[nseg];
+				if (n > 1) {
+					n -= 1;
+				};
+			};
+			continue;
+		};
+		if (nseg >= MAXSEG || n + seglen + 1 > PATHMAX) {
+			break;
+		};
+		seg[nseg] = n;
+		nseg += 1;
+		for (let j = 0z; j < seglen; j += 1) {
+			normbuf[n] = src[start + j];
+			n += 1;
+		};
+		normbuf[n] = ('/': u8);
+		n += 1;
+	};
+	if (n > 1 && normbuf[n - 1] == ('/': u8)) {
+		n -= 1;
+	};
+	return *(&normbuf[..n]: *str);
+};
+
+// Turns a path as it was written into an absolute one. A relative path is
+// taken from the directory the process is in, so a program can walk about
+// without being told where it was started.
+fn resolve(path: []u8) str = {
+	if (len(path) > 0 && path[0] == ('/': u8)) {
+		return normalize(path);
+	};
+	const here = path_of(cur().cwd);
+	const hb = *(&here: *[]u8);
+	let n = 0z;
+	for (let i = 0z; i < len(hb) && n + 1 < PATHMAX; i += 1) {
+		joinbuf[n] = hb[i];
+		n += 1;
+	};
+	if (n > 0 && joinbuf[n - 1] != ('/': u8) && n + 1 < PATHMAX) {
+		joinbuf[n] = ('/': u8);
+		n += 1;
+	};
+	for (let i = 0z; i < len(path) && n < PATHMAX; i += 1) {
+		joinbuf[n] = path[i];
+		n += 1;
+	};
+	return normalize(joinbuf[..n]);
+};
+
 // A path resolves straight to a node id. The old route sent a string of wire
 // messages (proto, attach, one walk per component) and ended at a 2 KiB
 // message buffer, which capped every read at that size and was the single
 // biggest cost in the compiler's file handling. Nothing here needs the wire:
 // the "server" is this same file.
 fn lookup(path: []u8) size = {
+	const p = resolve(path);
+	return lookup_abs(*(&p: *[]u8));
+};
+
+// The same, for a path that is already absolute. Keeping the two apart
+// matters: resolve() writes into a buffer the path may be pointing at, so a
+// caller that has already resolved a path must not have it resolved again.
+fn lookup_abs(path: []u8) size = {
 	let id = cur().root;
 	let start = 0z;
 	for (let i = 0z; i <= len(path); i += 1) {
@@ -885,6 +1067,22 @@ fn lookup(path: []u8) size = {
 		};
 	};
 	return id;
+};
+
+// Moves the process into a directory. The path is taken as it is written, so
+// a relative one is from where the process already is.
+export fn chdir(path: str) bool = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD || !nodes[id].isdir) {
+		return false;
+	};
+	cur().cwd = id;
+	return true;
+};
+
+// Where the process is, as an absolute path.
+export fn cwd() str = {
+	return path_of(cur().cwd);
 };
 
 fn copy_in(dst: uintptr, src: []u8, n: size) void = {
@@ -971,7 +1169,11 @@ export fn stat(path: str, out: *filestat) bool = {
 		if (nd.writable) {
 			out.length = nd.wlen: u64;
 		} else if (nd.gdsk == null && nd.gen == null) {
-			out.length = len(nd.content): u64;
+			if (len(nd.content) > 0) {
+				out.length = len(nd.content): u64;
+			} else {
+				out.length = nd.fsize;
+			};
 		};
 	};
 	return true;
@@ -1032,22 +1234,29 @@ export fn write_file(path: str, data: []u8) size = {
 };
 
 export fn create(path: str, isdir: bool) bool = {
-	const p = *(&path: *[]u8);
+	// The path is made absolute first, so a name with no slash in it lands
+	// in the directory the process is in rather than nowhere at all.
+	const p = resolve(*(&path: *[]u8));
+	const pb = *(&p: *[]u8);
 	let slash = NOCHILD;
-	for (let i = 0z; i < len(p); i += 1) {
-		if (p[i] == ('/': u8)) {
+	for (let i = 0z; i < len(pb); i += 1) {
+		if (pb[i] == ('/': u8)) {
 			slash = i;
 		};
 	};
 	if (slash == NOCHILD) {
 		return false;
 	};
-	const parent = if (slash == 0) "/" else *(&p[..slash]: *str);
-	const base = p[slash + 1..];
+	// A path that ends in a slash names a directory.
+	let end = len(pb);
+	if (end > 0 && pb[end - 1] == ('/': u8)) {
+		end -= 1;
+	};
+	const base = pb[slash + 1..end];
 	if (len(base) == 0 || len(base) > 31) {
 		return false;
 	};
-	const pid = lookup(*(&parent: *[]u8));
+	const pid = lookup_abs(pb[..slash]);
 	if (pid == NOCHILD || !nodes[pid].isdir) {
 		return false;
 	};
@@ -1074,6 +1283,11 @@ export fn create(path: str, isdir: bool) bool = {
 export fn remove(path: str) bool = {
 	const id = lookup(*(&path: *[]u8));
 	if (id == NOCHILD || id == cur().root) {
+		return false;
+	};
+	// The directory a process is in cannot go: the process would be left
+	// pointing at a node that is no longer there.
+	if (id == cur().cwd) {
 		return false;
 	};
 	if (nodes[id].isdir && nodes[id].nchild > 0) {

@@ -23,6 +23,8 @@ export def FRESH: u64 = 13;
 export def SPAWN_SHARED: u64 = 14;
 export def STAT: u64 = 16;
 export def SCREEN: u64 = 17;
+export def CHDIR: u64 = 18;
+export def PWD: u64 = 19;
 
 type raw = struct {
 	data: *[*]u8,
@@ -116,6 +118,30 @@ fn spawnpath_shared(regs: *architecture::registers) u64 = {
 	return loader::run(path): u64;
 };
 
+// Moves the calling process into a directory. A relative path is from where
+// the process already is.
+fn changepath(regs: *architecture::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	return if (fs::chdir(path)) 1 else 0;
+};
+
+// Writes the calling process's directory into a buffer it owns. The path is
+// made here rather than in the caller, since only the kernel knows which node
+// a process is sitting in.
+fn cwdpath(regs: *architecture::registers) u64 = {
+	const p = fs::cwd();
+	const b = *(&p: *[]u8);
+	const n = len(b);
+	if (n > (regs.rsi: size)) {
+		return 0;
+	};
+	for (let i = 0z; i < n; i += 1) {
+		const q = ((regs.rdi: uintptr) + (i: uintptr)): *u8;
+		*q = b[i];
+	};
+	return n: u64;
+};
+
 fn handle(regs: *architecture::registers) uintptr = {
 	switch (regs.rax) {
 	case EXIT =>
@@ -175,6 +201,12 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case FRESH =>
 		regs.rax = if (kit::take_fresh()) 1 else 0;
+		return regs: uintptr;
+	case CHDIR =>
+		regs.rax = changepath(regs);
+		return regs: uintptr;
+	case PWD =>
+		regs.rax = cwdpath(regs);
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

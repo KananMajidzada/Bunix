@@ -132,6 +132,14 @@ spawned process instead gets a private root with `/dev` and `/proc` bound in
 and its own `/tmp`, so its files are private to it. The BFP server keeps one
 handle table per namespace and starts every attach at that namespace's root.
 
+A namespace also holds the directory its process is in. A path that starts
+with a slash is looked for from the root of the namespace; a path that does
+not is looked for from there, and `.` and `..` are folded away on the way.
+The directory is a node in the tree rather than a name, so two processes can
+be in different places at once, and a process that shares a namespace with
+the one that started it starts where that one is. The `chdir` and `pwd` calls
+are how a process says where it is.
+
 ## The port environment
 
 The kernel speaks its own calls; a POSIX layer shoved into it would be the
@@ -157,6 +165,35 @@ runs instead, so the built-ins and the single-image commands are unaffected.
 
 A `/bin` that programs are discovered through, and a C compiler driver that
 compiles against the shim, are still to come.
+
+## The shell
+
+The shell is the userland program the kernel starts first, and it is the way
+into everything else. It keeps a working directory, a history of the commands
+that have been run, and a set of aliases. The arrow keys walk the history and
+move along the line, and the escape sequences the kernel's keyboard driver
+already sends are what the shell reads them from.
+
+The commands of the shell itself work on paths, so they follow the working
+directory: `cat`, `write`, `mkdir`, `rm` and `hd` take a path, and `cd` moves
+between them. The rest are about the machine: `pwd`, `env`, `export`, `unset`,
+`alias`, `unalias`, `history`, `which`, `man`, `uptime`, `free`, `sleep`,
+`clear`, `true` and `false`.
+
+A program with an image of its own is found through `/bin` and run by name.
+The loader takes the first word of the line to pick the image, so the program
+is handed the rest of the line and nothing else: `sort /tmp/x` arrives at
+`sort` as `/tmp/x`.
+
+A word with a `*` in it is looked for before the line is handed over, and
+the names that match take its place. Only a command that takes paths is
+looked at this way, since the text of a write is not a path and a `*` in it
+is just a `*`. A word that matches nothing is left as it was, so the program
+can say that it cannot find it.
+
+There is no redirection and no pipe yet. Both want a descriptor per process
+that the kernel knows about, and the native interface moves whole files
+rather than bytes, so there is nowhere for a pipe to sit.
 
 ## Conventions
 
@@ -187,6 +224,11 @@ window manager with overlapping terminals, a pop-up menu, border resize, title
 drag, and hide and delete, all drawn through a RAM shadow buffer that is copied
 to the device whole.
 
+Done also: a working directory for every process, so a path that does not
+start with a slash is looked for from where the process is, and `cd` and
+`pwd` say so. The shell has a history the arrow keys walk, aliases, and an
+environment of its own.
+
 Started: the port environment. A POSIX shim in userspace gives the user program
 `open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
 `wc`, `grep`, and `cp` are written against it, and each is a loadable image of
@@ -204,3 +246,5 @@ Next: a C compiler driver for the port environment.
 6. The port environment: a POSIX library, a shell, and a C compiler driver.
    [shim, loader, and first programs done; compiler driver next]
 7. A filesystem with persistence. [done]
+8. A working directory for every process, and a shell that follows it.
+   [done]

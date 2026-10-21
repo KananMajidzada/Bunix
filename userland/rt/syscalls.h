@@ -33,6 +33,8 @@ typedef long ssize_t;
 #define SYS_SPAWN_SHARED 14
 #define SYS_STAT        16
 #define SYS_SCREEN      17
+#define SYS_CHDIR       18
+#define SYS_PWD         19
 
 static inline uint64_t syscall0(uint64_t n) {
     uint64_t ret;
@@ -160,6 +162,18 @@ static inline int bunix_fresh(void) {
 
 static inline void bunix_halt(void) {
     syscall0(SYS_HALT);
+}
+
+// The directory the process is in. A relative path is taken from there.
+static inline int bunix_chdir(const char *path) {
+    uint64_t n = path_len(path);
+    return (int)syscall2(SYS_CHDIR, (uint64_t)path, n);
+}
+
+// Where the process is. The path is written into the buffer and its length
+// is returned, or zero when it does not fit.
+static inline size_t bunix_pwd(char *buf, size_t count) {
+    return (size_t)syscall2(SYS_PWD, (uint64_t)buf, count);
 }
 
 #endif
