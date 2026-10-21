@@ -149,7 +149,8 @@ That leaves you a `bunix.bin`.
 or just `make run`. The screen you get is drawn on the framebuffer; the serial
 line carries the same text.
 
-Type `help` to see what the shell knows.
+Type `help` to see what the shell knows, and `tutorial` for a walk through
+the system, a page at a time. `man <command>` says what one command does.
 
 To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 

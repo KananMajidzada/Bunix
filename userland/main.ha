@@ -76,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [70]entry = [
+const MANUAL: [71]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -106,6 +106,7 @@ const MANUAL: [70]entry = [
 	entry { name = "multi", help = "start three programs at once", builtin = true , paths = false },
 	entry { name = "version", help = "say what this is", builtin = true , paths = false },
 	entry { name = "help", help = "say what can be done", builtin = true , paths = false },
+	entry { name = "tutorial", help = "a walk through the system", builtin = true , paths = false },
 	entry { name = "exit", help = "leave the shell", builtin = true , paths = false },
 	entry { name = "halt", help = "stop the machine", builtin = true , paths = false },
 	entry { name = "poweroff", help = "stop the machine", builtin = true , paths = false },
@@ -552,6 +553,8 @@ fn run_command(line: []u8) bool = {
 		return false;
 	} else if (str_eq(cmd, "help")) {
 		run_help();
+	} else if (str_eq(cmd, "tutorial")) {
+		run_tutorial(rest);
 	} else if (str_eq(cmd, "version")) {
 		const vp: str = "/proc/version";
 		run_cat(*(&vp: *[]u8));
@@ -1039,6 +1042,190 @@ fn run_help() void = {
 	rt::println("A > at the end of a line sends the output to a file, and a");
 	rt::println(">> adds to what is already in it. A | sends it to a file the");
 	rt::println("command after the | is given, as in cat /tmp/x | wc -l.");
+	rt::println("Type tutorial for a walk through the system.");
+};
+
+// How many chapters the tutorial has, besides the opening page.
+def CHAPTERS: size = 5;
+
+// The tutorial, a page at a time, so that a page fits on the screen. With no
+// chapter named it shows where to begin.
+fn run_tutorial(rest: []u8) void = {
+	let a = rest;
+	for (len(a) > 0 && (a[0] == (' ': u8) || a[0] == ('\t': u8))) {
+		a = a[1..];
+	};
+	let end = len(a);
+	for (end > 0 && (a[end - 1] == (' ': u8) || a[end - 1] == ('\t': u8))) {
+		end -= 1;
+	};
+	a = a[..end];
+	if (len(a) == 0) {
+		tut_page(0);
+		return;
+	};
+	if (str_eq(a, "all")) {
+		for (let p = 0z; p <= CHAPTERS; p += 1) {
+			if (p > 0) {
+				rt::println("");
+			};
+			tut_page(p);
+		};
+		return;
+	};
+	let n: u64 = 0;
+	if (lib::number(a, &n) == 0 || n > (CHAPTERS: u64)) {
+		rt::println("usage: tutorial [1-5|all]");
+		return;
+	};
+	tut_page(n: size);
+};
+
+fn tut_page(p: size) void = {
+	if (p == 0) {
+		tut_intro();
+	} else if (p == 1) {
+		tut_where();
+	} else if (p == 2) {
+		tut_files();
+	} else if (p == 3) {
+		tut_find();
+	} else if (p == 4) {
+		tut_devices();
+	} else {
+		tut_machine();
+	};
+};
+
+fn tut_intro() void = {
+	rt::println("Bunix tutorial");
+	rt::println("");
+	rt::println("Bunix is a small Unix. It starts one program, the shell, and the");
+	rt::println("shell is where you work. The one idea to keep is that everything");
+	rt::println("you can name is a file: a directory, the disk, the kernel, the");
+	rt::println("memory, even a pipe.");
+	rt::println("");
+	rt::println("Read a chapter with");
+	rt::println("  tutorial 1    where you are");
+	rt::println("  tutorial 2    files and directories");
+	rt::println("  tutorial 3    finding things");
+	rt::println("  tutorial 4    files that are not files");
+	rt::println("  tutorial 5    programs and the machine");
+	rt::println("  tutorial all  all five");
+	rt::println("");
+	rt::println("man <command> says what one command does.");
+};
+
+fn tut_where() void = {
+	rt::println("1  where you are");
+	rt::println("");
+	rt::println("Every process has a working directory, and pwd says what it is.");
+	rt::println("");
+	rt::println("  ush> pwd");
+	rt::println("  /");
+	rt::println("");
+	rt::println("cd moves it. A path that does not start with / is looked for from");
+	rt::println("there. pushd remembers a directory and popd comes back to it.");
+	rt::println("");
+	rt::println("  ush> cd /tmp");
+	rt::println("  ush> pwd");
+	rt::println("  /tmp");
+	rt::println("");
+	rt::println("ls lists a directory. ls -l adds the size, or says it is a");
+	rt::println("directory, and ls -R walks the whole tree.");
+	rt::println("");
+	rt::println("  ush> ls /dev");
+	rt::println("  ush> ls -l /bin");
+};
+
+fn tut_files() void = {
+	rt::println("2  files and directories");
+	rt::println("");
+	rt::println("write puts text in a file. It does not add a line end, so say \\n");
+	rt::println("where you want one.");
+	rt::println("");
+	rt::println("  ush> write /tmp/note.txt \"one\\ntwo\\n\"");
+	rt::println("  ush> cat /tmp/note.txt");
+	rt::println("");
+	rt::println("cat prints a file, mkdir makes a directory and touch an empty");
+	rt::println("one. cp copies a file, cp -r a whole tree, and mv moves.");
+	rt::println("");
+	rt::println("  ush> mkdir /tmp/work");
+	rt::println("  ush> cp /tmp/note.txt /tmp/work/copy.txt");
+	rt::println("  ush> rm -r /tmp/work");
+	rt::println("");
+	rt::println("A name with a space in it goes in quotes.");
+	rt::println("");
+	rt::println("  ush> write \"/tmp/two words.txt\" \"hi\\n\"");
+	rt::println("  ush> cat \"/tmp/two words.txt\"");
+};
+
+fn tut_find() void = {
+	rt::println("3  finding things");
+	rt::println("");
+	rt::println("The small programs take a file and say something about it.");
+	rt::println("");
+	rt::println("  ush> wc -l /tmp/note.txt       how many lines");
+	rt::println("  ush> head -2 /tmp/note.txt     the first two");
+	rt::println("  ush> tail -2 /tmp/note.txt     the last two");
+	rt::println("  ush> sort /tmp/note.txt        the lines in order");
+	rt::println("  ush> grep one /tmp/note.txt    the lines holding one");
+	rt::println("");
+	rt::println("cut takes part of each line, and tr changes characters.");
+	rt::println("");
+	rt::println("  ush> cut -d \" \" -f 1 /tmp/note.txt");
+	rt::println("  ush> tr a-z A-Z /tmp/note.txt");
+	rt::println("");
+	rt::println("A * in a name stands for any run of characters, and the shell");
+	rt::println("looks for it before the program runs, so a command that takes");
+	rt::println("paths can be given a pattern.");
+	rt::println("");
+	rt::println("  ush> ls /usr/include/std*.h");
+	rt::println("  ush> find /usr/src -name \"*.c\"");
+};
+
+fn tut_devices() void = {
+	rt::println("4  files that are not files");
+	rt::println("");
+	rt::println("Some files are made when you read them.");
+	rt::println("");
+	rt::println("  ush> cat /proc/mem      the memory");
+	rt::println("  ush> cat /proc/uptime   seconds since it started");
+	rt::println("  ush> hd /dev/bootsec    the boot sector, in hex");
+	rt::println("");
+	rt::println("The output of a command can go to a file instead of the screen,");
+	rt::println("with > to start the file over and >> to add to it.");
+	rt::println("");
+	rt::println("  ush> ls /usr/include > /tmp/list");
+	rt::println("  ush> wc -l /tmp/list");
+	rt::println("");
+	rt::println("A | is a pipe, and a pipe is a file: the command on the left");
+	rt::println("writes it, and the command on the right is given it.");
+	rt::println("");
+	rt::println("  ush> cat /tmp/list | sort");
+	rt::println("  ush> cat /tmp/list | grep std | wc -l");
+};
+
+fn tut_machine() void = {
+	rt::println("5  programs and the machine");
+	rt::println("");
+	rt::println("A program with an image of its own is in /bin and is run by its");
+	rt::println("name. The shell hands it the rest of the line, not its own name.");
+	rt::println("");
+	rt::println("  ush> sort -r /tmp/list");
+	rt::println("");
+	rt::println("The C compiler is part of the system.");
+	rt::println("");
+	rt::println("  ush> write /tmp/hi.c \"int puts();\\n\"");
+	rt::println("  ush> write -a /tmp/hi.c \"int main(void){puts(\\\"hi\\\");}\\n\"");
+	rt::println("  ush> cc -o /tmp/hi /tmp/hi.c");
+	rt::println("  ush> /tmp/hi");
+	rt::println("");
+	rt::println("Some commands are about the machine: free for the memory, df for");
+	rt::println("the disk, ps for the programs that are running.");
+	rt::println("");
+	rt::println("install puts Bunix on a disk and asks before it writes. halt");
+	rt::println("stops it.");
 };
 
 // Waits for a number of seconds.

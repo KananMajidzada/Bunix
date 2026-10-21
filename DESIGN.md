@@ -232,6 +232,12 @@ between them. The rest are about the machine: `pwd`, `env`, `export`, `unset`,
 `alias`, `unalias`, `history`, `which`, `man`, `uptime`, `free`, `sleep`,
 `clear`, `true` and `false`.
 
+`tutorial` is a walk through the system for someone who has just landed in it.
+It goes a page at a time, and a page is meant to fit on the screen: where you
+are, files and directories, finding things, the files that are not files, and
+programs and the machine. Every example in it is a command that was run before
+it was written down. `man` is the other end of it: one line about one command.
+
 A program with an image of its own is found through `/bin` and run by name.
 The loader takes the first word of the line to pick the image, so the program
 is handed the rest of the line and nothing else: `sort /tmp/x` arrives at
