@@ -322,14 +322,102 @@ fn shell() void = {
 	};
 };
 
+// Where the output of a command is sent, when the line says so with a ">"
+// or a ">>" at the end of it.
+type redirect = struct {
+	mark: size,
+	add: bool,
+};
+
+// Looks for the mark that sends the output of a command to a file. The mark
+// has to be outside of quotes, so that a file name may have one in it.
+fn find_redirect(line: []u8, r: *redirect) bool = {
+	r.mark = 0;
+	r.add = false;
+	let quote = 0u8;
+	for (let i = 0z; i < len(line); i += 1) {
+		const c = line[i];
+		if (quote != 0) {
+			if (c == quote) {
+				quote = 0;
+			};
+			continue;
+		};
+		if (c == ('"': u8) || c == ('\'': u8)) {
+			quote = c;
+			continue;
+		};
+		if (c == ('>': u8)) {
+			r.mark = i;
+			r.add = i + 1 < len(line) && line[i + 1] == ('>': u8);
+			return true;
+		};
+	};
+	return false;
+};
+
+// Takes the quotes off a word, when it has them.
+fn strip_quotes(word: str) str = {
+	const b = *(&word: *[]u8);
+	if (len(b) >= 2) {
+		if ((b[0] == ('"': u8) && b[len(b) - 1] == ('"': u8))
+				|| (b[0] == 39 && b[len(b) - 1] == 39)) {
+			return *(&b[1..len(b) - 1]: *str);
+		};
+	};
+	return word;
+};
+
 // Runs one line of input. The alias is put in first, then the command is
 // looked up. It says whether the shell should keep going.
 fn run_line(line: []u8) bool = {
 	hist_add(line);
 	const expanded = expand_alias(line);
-	const sp = lib::first_space(expanded);
-	const cmd = expanded[..sp];
-	const rest = if (sp < len(expanded)) expanded[sp + 1..] else expanded[0..0];
+	// The output of the command may be sent to a file instead of the
+	// screen. The mark is looked for before the command is run, so that
+	// the file is made even when the command itself is not there.
+	let r = redirect { mark = 0, add = false };
+	if (!find_redirect(expanded, &r) || r.mark == 0) {
+		return run_command(expanded);
+	};
+	// The name of the file is what is left, without the spaces around it.
+	const skip: size = if (r.add) 2 else 1;
+	let name = expanded[r.mark + skip..];
+	let start = 0z;
+	for (let i = 0z; i < len(name); i += 1) {
+		if (name[i] != (' ': u8) && name[i] != ('\t': u8)) {
+			start = i;
+			break;
+		};
+	};
+	let end = 0z;
+	for (let i = 0z; i < len(name); i += 1) {
+		if (name[i] != (' ': u8) && name[i] != ('\t': u8)) {
+			end = i + 1;
+		};
+	};
+	name = name[start..end];
+	if (len(name) == 0) {
+		rt::println("usage: command > file");
+		return true;
+	};
+	const path = strip_quotes(*(&name: *str));
+	if (!rt::redirect(path, r.add)) {
+		rt::print("cannot write to ");
+		rt::println(path);
+		return true;
+	};
+	const ok = run_command(expanded[..r.mark]);
+	// The output goes back to the screen.
+	rt::redirect("", false);
+	return ok;
+};
+
+// Runs a command. The line has its alias put in already.
+fn run_command(line: []u8) bool = {
+	const sp = lib::first_space(line);
+	const cmd = line[..sp];
+	const rest = if (sp < len(line)) line[sp + 1..] else line[0..0];
 	if (str_eq(cmd, "exit")) {
 		rt::println("bye");
 		return false;
@@ -401,11 +489,11 @@ fn run_line(line: []u8) bool = {
 		run_rm(rest);
 	} else if (is_extprog(cmd)) {
 		// external program with an image of its own
-		run(glob_for(cmd, expanded));
+		run(glob_for(cmd, line));
 	} else if (is_path(cmd)) {
 		// a path into the filesystem: the loader decides whether it
 		// is an executable to run or a file to read
-		run(glob_for(cmd, expanded));
+		run(glob_for(cmd, line));
 	} else if (str_eq(cmd, "user")) {
 		const pid = rt::spawn(*(&rest: *str));
 		if (pid == ~0u64) {
@@ -418,7 +506,7 @@ fn run_line(line: []u8) bool = {
 		};
 	} else if (str_eq(cmd, "multi")) {
 		run_multi();
-	} else if (str_eq(cmd, "halt")) {
+	} else if (str_eq(cmd, "halt") || str_eq(cmd, "poweroff")) {
 		rt::print("halting. ");
 		rt::haltsys();
 	} else {
