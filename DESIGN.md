@@ -252,8 +252,32 @@ thread, and a program started while the output is going to a file inherits
 it, so `ls /usr > /tmp/list` puts the listing of the directory in the file,
 and not just the echo of it.
 
-There is still no pipe. A pipe wants two ends and something in the middle,
-and the kernel moves whole files rather than bytes.
+The output of a command can be sent to a file, with `>` to start the file
+over and with `>>` to add to what is in it. The redirection is done by the
+kernel rather than by the shell, because the shell is not the only thing
+whose output can be redirected: a program with an image of its own writes
+through the same call. The kernel keeps the file and the place in it per
+thread, and a program started while the output is going to a file inherits
+it, so `ls /usr > /tmp/list` puts the listing of the directory in the file,
+and not just the echo of it.
+
+A word can be in quotes, and the quotes come off before the program sees the
+word, so a name with a space in it stays one word:
+`cat "/tmp/with space.txt"`. When a line is built again after a `*` has been
+looked for, a word with a space in it is put back in quotes, so it is still
+one word when the program splits it.
+
+A pipe is a file. `a | b` runs `a` with its output going to `/dev/pipe0`, and
+then runs `b` with that file as its last argument, so
+
+	ush> cat /usr/include/stdio.h | wc -l
+
+counts the lines `cat` wrote. Each pipe in a longer line has a file of its
+own, and the file is taken away when the last command is done. The two
+commands do not run at once — the one on the left has finished before the one
+on the right starts — so this is not a pipe of two ends and something in the
+middle, but it is a real file, and the commands that take a path work through
+it. A command that does not take a path cannot stand on the right of a pipe.
 
 ## Conventions
 
@@ -298,6 +322,22 @@ Done also: the output of a command can be sent to a file, with `>` and
 `>>`, for the commands the shell has built in and for the programs that have
 an image of their own.
 
+Done also: a word can be in quotes, so a name with a space in it is one word,
+and the quotes come off before the program sees it.
+
+Done also: a pipe, as a file. The command on the left writes to `/dev/pipeN`
+and the command on the right is given that file, so the filters that take a
+path work through a pipe even though the two commands run one after the
+other, and not at the same time.
+
+Done also: the small flags that make the filters worth having. `sort` takes
+`-n` for numbers, `-r` for the order turned around and `-u` for a line that
+repeats the one before it, `grep` takes `-i`, `-v`, `-n` and `-c`, `comm`
+prints the three columns and keeps `-1`, `-2` and `-3` from showing one,
+`head` and `tail` take the count as `-n 5` or as `-5`, `cp` copies a tree
+with `-r` and takes more than one file. `tr` holds ranges, as in `a-z`, and
+`split` takes the name the pieces are given.
+
 Started: the port environment. A POSIX shim in userspace gives the user program
 `open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
 `wc`, `grep`, and `cp` are written against it, and each is a loadable image of
@@ -320,3 +360,4 @@ Next: a C compiler driver for the port environment.
 9. A boot from a disk: a boot sector, a second stage, and an installer.
    [done]
 10. Output redirection. [done]
+11. A pipe, as a file. [done]

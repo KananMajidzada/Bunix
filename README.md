@@ -48,8 +48,9 @@ history and a few aliases, and the arrow keys walk the history.
 
 The commands of the shell itself are `cat`, `cd`, `pwd`, `echo`, `write`,
 `mkdir`, `touch`, `rm`, `hd`, `cc`, `env`, `export`, `unset`, `alias`,
-`unalias`, `history`, `which`, `man`, `uptime`, `free`, `sleep`, `clear`,
-`true`, `false`, `user`, `multi`, `version`, `help`, `halt` and `exit`.
+`unalias`, `history`, `which`, `type`, `man`, `uptime`, `free`, `sleep`,
+`clear`, `true`, `false`, `pushd`, `popd`, `user`, `multi`, `version`,
+`help`, `halt`, `poweroff` and `exit`.
 
 The programs with an image of their own are found through `/bin` and are run
 by name: `ls`, `sort`, `uniq`, `head`, `tail`, `tr`, `rev`, `seq`, `expr`,
@@ -72,8 +73,31 @@ The output of a command can be sent to a file, with `>` to start the file
 over and with `>>` to add to what is already in it:
 
 	ush> ls /usr/include > /tmp/list
-	ush> cat /tmp/list | wc -l
-	44
+	ush> wc -l /tmp/list
+	44 /tmp/list
+
+A word can be in quotes, so a name with a space in it stays one word:
+
+	ush> write "/tmp/with space.txt" "a line\n"
+	ush> cat "/tmp/with space.txt"
+	a line
+
+A pipe is a file. The command on the left writes to `/dev/pipe0`, and the one
+on the right is given that file:
+
+	ush> cat /tmp/list | sort
+	ush> cat /tmp/list | grep -n std | head -3
+	1	stdalign.h
+	2	stdarg.h
+	3	stdbool.h
+	ush> cat /tmp/list | sort > /tmp/sorted
+
+The two commands do not run at once — the left one finishes before the right
+one starts — but the file is real, and the commands that take a path work
+through it.
+
+The filters take the small flags: `sort -n -r -u`, `grep -i -v -n -c`,
+`wc -l -w -c`, `comm -1 -2 -3`, `head -5`, `tail -n 5`, `cp -r`, `tr a-z A-Z`.
 
 ## Installing on a disk
 
