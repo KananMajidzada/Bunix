@@ -23,8 +23,10 @@ SECTIONS {
 	}
 
 	.data : ALIGN(4096) {
+		PROVIDE_HIDDEN(__data_start = .);
 		KEEP(*(.data))
 		*(.data.*)
+		PROVIDE_HIDDEN(__data_end = .);
 	}
 
 	.init_array : ALIGN(8) {
@@ -39,10 +41,16 @@ SECTIONS {
 		PROVIDE_HIDDEN(__fini_array_end = .);
 	}
 
+	# Where the image ends. The space for the variables that start at
+	# zero is not in the file, so this is the end of what is loaded.
+	__image_end = .;
+
 	.bss : ALIGN(4096) {
+		PROVIDE_HIDDEN(__bss_start = .);
 		KEEP(*(.bss))
 		*(.bss.*)
 		*(COMMON)
+		PROVIDE_HIDDEN(__bss_end = .);
 	}
 
 	_kernel_end = .;

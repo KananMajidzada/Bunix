@@ -20,6 +20,10 @@ let present: bool = false;
 let nsec: u64 = 0;
 
 @init fn init() void = {
+	// The machine checks the permission for input and output against the
+	// task state segment, and there is none until it is set up.
+	architecture::tss_init();
+	architecture::outb(0x3F8, 0x42);
 	architecture::outb(DRVS, 0xA0);
 	architecture::io_wait();
 	if (architecture::inb(CMDS) == 0xFF) {

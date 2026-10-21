@@ -42,6 +42,7 @@ export fn init(mb: *boot::info) void = {
 	};
 
 	// Release what the boot loader called available.
+	const reserved = (((bend + PAGE - 1) & ~(PAGE - 1)) / PAGE): u64;
 	if ((mb.flags & boot::FLAG_MMAP) != 0) {
 		let q = mb.mmap_addr: uintptr;
 		const mend = q + (mb.mmap_length: uintptr);
@@ -59,10 +60,16 @@ export fn init(mb: *boot::info) void = {
 			};
 			q += (e.sz + 4): uintptr;
 		};
+	} else {
+		// A loader that says nothing about the memory is taken to mean
+		// that all of it above the kernel is there to be used. The boot
+		// sector of Bunix is one such loader.
+		for (let i = reserved; i < nframes; i += 1) {
+			clear(i);
+		};
 	};
 
 	// Reclaim low memory, the kernel, and the bitmap itself.
-	const reserved = (((bend + PAGE - 1) & ~(PAGE - 1)) / PAGE): u64;
 	for (let i = 0u64; i < reserved; i += 1) {
 		set(i);
 	};

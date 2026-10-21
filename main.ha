@@ -68,6 +68,11 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		rt::halt();
 	};
 
+	// A mark on the serial line with the information the kernel was
+	// given, to see that it arrived.
+	architecture::outb(0x3F8, 0x21);
+	architecture::outb(0x3F8, 0x0D);
+	architecture::outb(0x3F8, 0x0A);
 	const mb = boot::at(mbi);
 	let mem_mib = 0u64;
 	if ((mb.flags & boot::FLAG_MMAP) != 0) {

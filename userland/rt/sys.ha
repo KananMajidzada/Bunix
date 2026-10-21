@@ -35,6 +35,15 @@ type shdr = struct {
 @symbol("rt.sys_pwd") fn sys_pwd(dptr: uintptr, dlen: size) u64;
 @symbol("rt.sys_ps") fn sys_ps(dptr: uintptr, dlen: size) u64;
 @symbol("rt.sys_kill") fn sys_kill(id: u64) u64;
+@symbol("rt.sys_readat") fn sys_readat(pptr: uintptr, plen: size, dptr: uintptr, dlen: size, off: u64) u64;
+@symbol("rt.sys_writeat") fn sys_writeat(pptr: uintptr, plen: size, dptr: uintptr, dlen: size, off: u64) u64;
+@symbol("rt.sys_appendfile") fn sys_append(
+	pptr: uintptr,
+	plen: size,
+	dptr: uintptr,
+	dlen: size,
+) u64;
+@symbol("rt.sys_redirect") fn sys_redirect(pptr: uintptr, plen: size, mode: u64) u64;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 
@@ -174,6 +183,37 @@ export fn ps() []u8 = {
 // Stops a process.
 export fn kill(id: u64) bool = {
 	return sys_kill(id) != 0;
+};
+
+// Reads a file from an offset, which is what a file too big to be held in
+// memory needs.
+export fn readat(path: str, off: u64, dest: []u8) size = {
+	const p = *(&path: *shdr);
+	const d = *(&dest: *shdr);
+	return sys_readat(p.data, p.length, d.data, d.length, off): size;
+};
+
+// Writes to a file at an offset.
+export fn writeat(path: str, data: []u8, off: u64) size = {
+	const p = *(&path: *shdr);
+	const d = *(&data: *shdr);
+	return sys_writeat(p.data, p.length, d.data, d.length, off): size;
+};
+
+// Adds to the end of a file, making it when it is not there yet.
+export fn appendto(path: str, data: []u8) size = {
+	const p = *(&path: *shdr);
+	const d = *(&data: *shdr);
+	return sys_append(p.data, p.length, d.data, d.length): size;
+};
+
+// Sends the output of this process to a file instead of the screen, or back
+// to the screen when the path is empty. The file is emptied first when the
+// add flag is not set.
+export fn redirect(path: str, add: bool) bool = {
+	const p = *(&path: *shdr);
+	const mode = if (add) 2 else 1;
+	return sys_redirect(p.data, p.length, mode: u64) != 0;
 };
 
 // Where the process is, as an absolute path.

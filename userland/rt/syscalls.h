@@ -31,12 +31,16 @@ typedef long ssize_t;
 #define SYS_ALIVE       12
 #define SYS_FRESH       13
 #define SYS_SPAWN_SHARED 14
+#define SYS_APPEND      15
 #define SYS_STAT        16
 #define SYS_SCREEN      17
 #define SYS_CHDIR       18
 #define SYS_PWD         19
 #define SYS_PS          20
 #define SYS_KILL        21
+#define SYS_READAT      22
+#define SYS_WRITEAT     23
+#define SYS_REDIRECT    24
 
 static inline uint64_t syscall0(uint64_t n) {
     uint64_t ret;
@@ -97,7 +101,15 @@ static inline ssize_t bunix_writefile(const char *path, const void *buf, size_t 
 
 static inline ssize_t bunix_appendfile(const char *path, const void *buf, size_t count) {
     uint64_t n = path_len(path);
-    return (ssize_t)syscall4(15, (uint64_t)path, n, (uint64_t)buf, count);
+    return (ssize_t)syscall4(SYS_APPEND, (uint64_t)path, n, (uint64_t)buf, count);
+}
+
+// Sends the output of this process to a file instead of the console. Mode 1
+// empties the file first, mode 2 adds to it, and mode 0 puts the output
+// back on the console.
+static inline int bunix_redirect(const char *path, int mode) {
+    uint64_t n = path_len(path);
+    return (int)syscall3(SYS_REDIRECT, (uint64_t)path, n, (uint64_t)mode);
 }
 
 // Size and type of a path without reading it: mode 1 means a directory.

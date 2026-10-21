@@ -132,6 +132,24 @@ rt.sys_kill:
 	int $0x80
 	ret
 
+.global rt.sys_readat
+rt.sys_readat:
+	movq $22, %rax
+	int $0x80
+	ret
+
+.global rt.sys_writeat
+rt.sys_writeat:
+	movq $23, %rax
+	int $0x80
+	ret
+
+.global rt.sys_redirect
+rt.sys_redirect:
+	movq $24, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

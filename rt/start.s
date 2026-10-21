@@ -19,11 +19,24 @@ multiboot_header:
 .global _start
 _start:
 	cli
-	movl $0, mb_info
+	cld
+	# The information about the machine is kept in a register, because the
+	# space the linker left for the variables that start at zero is about
+	# to be cleared, and the information is in it.
+	xorl %esi, %esi
 	cmpl $0x2BADB002, %eax
 	jne 1f
-	movl %ebx, mb_info
+	movl %ebx, %esi
 1:
+	# The space the linker left for the variables that start at zero is
+	# not cleared by anything, so it is cleared here. It has to be done
+	# before the page tables are built, since those are in it as well.
+	movl $__bss_start, %edi
+	movl $__bss_end, %ecx
+	subl %edi, %ecx
+	xorl %eax, %eax
+	rep stosb
+	movl %esi, mb_info
 	/* Clear the three page table pages. */
 	xorl %eax, %eax
 	leal boot_pml4, %edi
@@ -77,9 +90,27 @@ long_entry:
 	movw $0x10, %ax
 	movw %ax, %ds
 	movw %ax, %es
-	movw %ax, %ss
 	movw %ax, %fs
 	movw %ax, %gs
+	movw $0x10, %ax
+	movw %ax, %ss
+	# The task state segment. The machine checks the permission for
+	# input and output against it, so it has to be in place before the
+	# kernel does any of either.
+	movq $tss, %rax
+	movw %ax, gdt64_tss+2		# the base of the segment
+	shrq $16, %rax
+	movb %al, gdt64_tss+4
+	shrq $8, %rax
+	movb %al, gdt64_tss+7
+	movb $0x89, gdt64_tss+5		# the kind: an available segment
+	# The limit is one byte short of the map of the ports, so that there
+	# is no map: without one, the machine lets every port be used.
+	movw $103, %ax
+	movw %ax, gdt64_tss		# the limit of it
+	movb $0, gdt64_tss+6		# the map of the ports
+	movw $0x28, %ax
+	ltr %ax
 	movq $stack_top, %rsp
 	xorq %rbp, %rbp
 	movl mb_info, %edi

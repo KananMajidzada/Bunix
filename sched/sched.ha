@@ -29,6 +29,12 @@ export type thread = struct {
 	// is doing.
 	cmd: [64]u8,
 	cmdlen: size,
+	// The file the output of this thread goes to, when it has been sent to
+	// one instead of the screen, and where in that file the next piece of
+	// output goes.
+	redir: [128]u8,
+	redirlen: size,
+	rediroff: u64,
 	alive: bool,
 	// Whether what the thread was using has been given back already, so
 	// that it is not given back twice.
@@ -73,6 +79,7 @@ let threads: [MAXTHREADS]thread = [thread {
 	id = 0, stack = 0, kernel = 0, frame = 0,
 	space = 0, heap = 0, heap_end = 0, fpu = 0, win = 0,
 	cmd = [0...], cmdlen = 0, alive = false, cleaned = false,
+	redir = [0...], redirlen = 0, rediroff = 0,
 }...];
 
 let nthreads: size = 0;
@@ -129,6 +136,7 @@ export fn start() void = {
 		space = 0, heap = 0, heap_end = 0,
 		fpu = thread_fpu(0), win = 0,
 		cmd = [0...], cmdlen = 0, alive = true, cleaned = false,
+		redir = [0...], redirlen = 0, rediroff = 0,
 	};
 	nthreads = 1;
 	current = 0;
@@ -267,6 +275,58 @@ export fn set_cmd(id: size, cmd: []u8) void = {
 		threads[id].cmd[i] = cmd[i];
 	};
 	threads[id].cmdlen = n;
+};
+
+// Sends the output of a thread to a file instead of the screen. An empty
+// path puts it back on the screen. The offset is where in the file the
+// output goes, which is the end of it when the file is being added to.
+export fn set_redirect(id: size, path: []u8, off: u64) void = {
+	if (id >= MAXTHREADS) {
+		return;
+	};
+	threads[id].redirlen = 0;
+	threads[id].rediroff = 0;
+	let n = len(path);
+	if (n > len(threads[id].redir)) {
+		n = len(threads[id].redir);
+	};
+	for (let i = 0z; i < n; i += 1) {
+		threads[id].redir[i] = path[i];
+	};
+	threads[id].redirlen = n;
+	threads[id].rediroff = off;
+};
+
+// The file the output of a thread goes to. The name is empty when the output
+// goes to the screen.
+export fn redirect_path(id: size) str = {
+	if (id >= MAXTHREADS) {
+		return "";
+	};
+	if (threads[id].redirlen == 0) {
+		return "";
+	};
+	return *(&threads[id].redir[..threads[id].redirlen]: *str);
+};
+
+// Where in that file the next piece of output goes.
+export fn redirect_place(id: size) u64 = {
+	if (id >= MAXTHREADS) {
+		return 0;
+	};
+	return threads[id].rediroff;
+};
+
+// Moves the place in the file that the output of a thread goes to.
+export fn redirect_advance(id: size, n: u64) void = {
+	if (id < MAXTHREADS) {
+		threads[id].rediroff += n;
+	};
+};
+
+// The thread that is running at the moment.
+export fn current_id() size = {
+	return current;
 };
 
 // The processes that are running, one per line: the number of the process
@@ -408,6 +468,9 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		cmdlen = 0,
 		alive = true,
 		cleaned = false,
+		redir = [0...],
+		redirlen = 0,
+		rediroff = 0,
 	};
 	if (w < MAXWIN) {
 		win_fg[w] = id;

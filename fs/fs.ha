@@ -139,6 +139,20 @@ def DBLK: u32 = 4;
 let dnext: u32 = DROOT + 1;
 let mntroot: size = 0;
 
+// Where the filesystem on the disk begins. A disk that has been installed
+// on has a partition table at the front of it, and the installer leaves a
+// record saying where the filesystem is; a disk that has not been installed
+// on has the filesystem at the front of it.
+let sb_sect: u32 = 0;
+
+// The record the installer leaves at the front of the disk.
+def RECOFF: size = 0x180;
+
+// The sector a block of the filesystem is at.
+fn dsect(blk: u32) u64 = {
+	return (sb_sect + blk): u64;
+};
+
 fn mknode(name: str, isdir: bool) size = {
 	const id = if (freehead != NOCHILD) {
 		const id0 = freehead;
@@ -393,6 +407,33 @@ fn gen_self(buf: []u8) size = {
 	return n;
 };
 
+// The kernel's own image, as it was loaded. The machine reads it to put
+// itself on a disk.
+fn kernel_gen(buf: []u8, off: u64, n: size) size = {
+	return rt::image(buf, off, n);
+};
+
+// The boot sector, which is folded into the kernel. The machine writes it
+// to the front of a disk to make that disk startable.
+fn bootsec_gen(buf: []u8, off: u64, n: size) size = {
+	let got = 0z;
+	for (got < n && off + (got: u64) < (len(user::bootsec): u64)) {
+		buf[got] = user::bootsec[(off + (got: u64)): size];
+		got += 1;
+	};
+	return got;
+};
+
+// The second stage of the boot, which the boot sector reads and jumps to.
+fn stage2_gen(buf: []u8, off: u64, n: size) size = {
+	let got = 0z;
+	for (got < n && off + (got: u64) < (len(user::stage2): u64)) {
+		buf[got] = user::stage2[(off + (got: u64)): size];
+		got += 1;
+	};
+	return got;
+};
+
 fn gen_disk(buf: []u8) size = {
 	let n = put_str(buf, "sectors ");
 	n += put_num(buf[n..], block::nsect());
@@ -493,12 +534,12 @@ fn sb_write() void = {
 	b[4] = '2': u8;
 	wle(b, 8, DROOT);
 	wle(b, 12, dnext);
-	block::write(0, b[..]);
+	block::write(dsect(0), b[..]);
 };
 
 fn sb_read() bool = {
 	let b: [512]u8 = [0...];
-	if (!block::read(0, b[..])) {
+	if (!block::read(dsect(0), b[..])) {
 		return false;
 	};
 	if (b[0] != 'B' || b[1] != 'U' || b[2] != 'N' || b[3] != 'X' || b[4] != '2') {
@@ -549,7 +590,7 @@ fn dsave_dir(id: size) void = {
 		wle(b, off + 34, cn.dblock);
 		wle(b, off + 38, cn.dlen);
 	};
-	block::write(nd.dblock: u64, b[..]);
+	block::write(dsect(nd.dblock), b[..]);
 };
 
 fn dpull(id: size) void = {
@@ -562,7 +603,7 @@ fn dpull(id: size) void = {
 	let todo = nd.dlen: size;
 	let blk = nd.dblock;
 	for (todo > 0) {
-		if (!block::read(blk: u64, loc[..])) {
+		if (!block::read(dsect(blk), loc[..])) {
 			break;
 		};
 		const take = if (512z < todo) 512z else todo;
@@ -581,7 +622,7 @@ fn dpull(id: size) void = {
 
 fn dload_dir(id: size, blk: u32) void = {
 	let b: [512]u8 = [0...];
-	if (!block::read(blk: u64, b[..])) {
+	if (!block::read(dsect(blk), b[..])) {
 		return;
 	};
 	const cnt = b[0]: size;
@@ -624,7 +665,7 @@ fn dstore(id: size) void = {
 			for (let j = 0z; j < take; j += 1) {
 				b[j] = *((nd.wbuf + (pos + j)): *u8);
 			};
-			block::write(blk: u64, b[..]);
+			block::write(dsect(blk), b[..]);
 			pos += take;
 			if (pos >= nd.wlen) {
 				break;
@@ -643,6 +684,15 @@ fn dmount() void = {
 	nodes[mntroot].disk = true;
 	nodes[mntroot].dblock = DROOT;
 	link(root, mntroot);
+	// The record at the front of the disk says where the filesystem is.
+	let rec: [512]u8 = [0...];
+	if (block::read(0, rec[..])) {
+		if (rec[RECOFF] == 'B' && rec[RECOFF + 1] == 'U'
+				&& rec[RECOFF + 2] == 'N' && rec[RECOFF + 3] == 'I'
+				&& rec[RECOFF + 4] == 'X') {
+			sb_sect = rle(rec, RECOFF + 0x10);
+		};
+	};
 	if (sb_read()) {
 		dload_dir(mntroot, DROOT);
 	} else {
@@ -730,6 +780,18 @@ export fn init() void = {
 	nodes[disk].gdsk = &disk_gen;
 	nodes[disk].wdsk = &disk_wdev;
 	link(dev, disk);
+
+	const kernel = mknode("kernel", false);
+	nodes[kernel].gdsk = &kernel_gen;
+	link(dev, kernel);
+
+	const bootsec = mknode("bootsec", false);
+	nodes[bootsec].gdsk = &bootsec_gen;
+	link(dev, bootsec);
+
+	const stage2 = mknode("stage2", false);
+	nodes[stage2].gdsk = &stage2_gen;
+	link(dev, stage2);
 
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
@@ -1150,6 +1212,32 @@ export fn read(path: str, dest: []u8) size = {
 	return read_node(id, dest);
 };
 
+// Reads a file from an offset, which is what a file too big to be held in
+// memory needs.
+export fn read_at(path: str, off: u64, dest: []u8) size = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return 0;
+	};
+	const nd = &nodes[id];
+	match (nd.gdsk) {
+	case let g: *fn(buf: []u8, off: u64, n: size) size =>
+		return g(dest, off, len(dest));
+	case null => void;
+	};
+	// A file that is held whole: the part from the offset on.
+	const whole = read_node(id, filebuf[..]);
+	if (off >= (whole: u64)) {
+		return 0;
+	};
+	let n = whole - (off: size);
+	if (n > len(dest)) {
+		n = len(dest);
+	};
+	copy_bytes(dest, filebuf[(off: size)..], n);
+	return n;
+};
+
 export type filestat = struct {
 	length: u64,
 	isdir: bool,
@@ -1231,6 +1319,90 @@ export fn write_file(path: str, data: []u8) size = {
 		dstore(id);
 	};
 	return len(data);
+};
+
+// Writes to a file at an offset, which is what putting a file onto a disk
+// needs: the kernel is bigger than any one buffer.
+export fn write_at(path: str, data: []u8, off: u64) size = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return 0;
+	};
+	const nd = &nodes[id];
+	match (nd.wdsk) {
+	case let f: *fn(data: []u8, off: u64) size =>
+		return f(data, off);
+	case null => void;
+	};
+	// A file that is held whole: the part from the offset on is put in,
+	// and the rest is left as it was.
+	if (!nd.writable) {
+		return 0;
+	};
+	const whole = read_node(id, filebuf[..]);
+	let n = len(data);
+	const end = off + (n: u64);
+	if (end > (whole: u64)) {
+		n = whole - (off: size);
+	};
+	if (n == 0) {
+		return 0;
+	};
+	if (!wreserve(nd, end: size)) {
+		return 0;
+	};
+	for (let i = 0z; i < n; i += 1) {
+		*((nd.wbuf + (off + (i: u64)): uintptr): *u8) = data[i];
+	};
+	if (end > (nd.wlen: u64)) {
+		nd.wlen = end: size;
+	};
+	if (nd.disk) {
+		dstore(id);
+	};
+	return n;
+};
+
+// Writes to a file at an offset, making the file longer when the writing
+// goes past its end. This is what sending the output of a program to a file
+// needs: the pieces arrive one at a time, each one after the last.
+export fn append_at(path: str, data: []u8, off: u64) size = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return 0;
+	};
+	const nd = &nodes[id];
+	match (nd.wdsk) {
+	case let f: *fn(data: []u8, off: u64) size =>
+		return f(data, off);
+	case null => void;
+	};
+	if (!nd.writable) {
+		return 0;
+	};
+	const end = off + (len(data): u64);
+	if (!wreserve(nd, end: size)) {
+		return 0;
+	};
+	for (let i = 0z; i < len(data); i += 1) {
+		*((nd.wbuf + (off + (i: u64)): uintptr): *u8) = data[i];
+	};
+	if (end > (nd.wlen: u64)) {
+		nd.wlen = end: size;
+	};
+	if (nd.disk) {
+		dstore(id);
+	};
+	return len(data);
+};
+
+// Adds to the end of a file, making it when it is not there yet.
+export fn append_file(path: str, data: []u8) size = {
+	const id = lookup(*(&path: *[]u8));
+	if (id == NOCHILD) {
+		return write_file(path, data);
+	};
+	return append_at(path, data, (nodes[id].wlen: u64));
 };
 
 export fn create(path: str, isdir: bool) bool = {

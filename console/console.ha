@@ -172,6 +172,10 @@ export fn pollch() u8 = {
 };
 
 @init fn init() void = {
+	// The machine checks the permission for input and output against the
+	// task state segment, and there is none until it is set up.
+	architecture::tss_init();
+	architecture::outb(0x3F8, 0x43);
 	serial_init();
 	vga_init();
 	mouse_init();

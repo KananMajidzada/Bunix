@@ -21,12 +21,16 @@ export def SPAWN: u64 = 11;
 export def ALIVE: u64 = 12;
 export def FRESH: u64 = 13;
 export def SPAWN_SHARED: u64 = 14;
+export def APPEND: u64 = 15;
 export def STAT: u64 = 16;
 export def SCREEN: u64 = 17;
 export def CHDIR: u64 = 18;
 export def PWD: u64 = 19;
 export def PS: u64 = 20;
 export def KILL: u64 = 21;
+export def READAT: u64 = 22;
+export def WRITEAT: u64 = 23;
+export def REDIRECT: u64 = 24;
 
 type raw = struct {
 	data: *[*]u8,
@@ -72,6 +76,65 @@ fn writefile(regs: *architecture::registers) u64 = {
 	return fs::write_file(path, b): u64;
 };
 
+// Adds to the end of a file, making it when it is not there yet.
+fn appendfile(regs: *architecture::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	const data = asstr(regs.rdx: uintptr, regs.rcx: size);
+	const b = *(&data: *[]u8);
+	return fs::append_file(path, b): u64;
+};
+
+// The output of a process goes to the file it was sent to, when it has one,
+// and to the screen otherwise. The file is named by the path and the length
+// of it, the mode says whether the file is emptied first or added to, and
+// the file is made when it is not there yet.
+fn redirectpath(regs: *architecture::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	const mode = regs.rdx;
+	const id = sched::current_id();
+	if (len(path) == 0 || mode == 0) {
+		// No file: the output goes back to the screen.
+		let none: [8]u8 = [0...];
+		sched::set_redirect(id, none[..0], 0);
+		return 1;
+	};
+	const p = *(&path: *[]u8);
+	if (mode == 1) {
+		// The file is emptied first, so that what is written to it is
+		// all that is in it.
+		let empty: [8]u8 = [0...];
+		fs::write_file(path, empty[..0]);
+		sched::set_redirect(id, p, 0);
+		return 1;
+	};
+	if (!fs::exists(path)) {
+		fs::create(path, false);
+	};
+	// The output is added to what the file already holds.
+	let st = fs::filestat { length = 0, isdir = false };
+	let place = 0u64;
+	if (fs::stat(path, &st)) {
+		place = st.length;
+	};
+	sched::set_redirect(id, p, place);
+	return 1;
+};
+
+// The output of a process, which goes to a file when the process has been
+// sent one and to the screen otherwise.
+fn writeout(regs: *architecture::registers) u64 = {
+	const id = sched::current_id();
+	const path = sched::redirect_path(id);
+	if (len(path) == 0) {
+		console::write_raw(regs.rdi: uintptr, regs.rsi: size);
+		return regs.rsi: u64;
+	};
+	const data = asbuf(regs.rdi: uintptr, regs.rsi: size);
+	const n = fs::append_at(path, data, sched::redirect_place(id));
+	sched::redirect_advance(id, n: u64);
+	return n: u64;
+};
+
 fn createpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
 	return if (fs::create(path, regs.rdx != 0)) 1 else 0;
@@ -111,13 +174,35 @@ fn readdirpath(regs: *architecture::registers) u64 = {
 
 fn spawnpath(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
-	return loader::run_fresh(path): u64;
+	const id = loader::run_fresh(path): u64;
+	inherit_redirect(id);
+	return id;
 };
 
 // Starts a program in the caller's namespace, so it sees the same files.
 fn spawnpath_shared(regs: *architecture::registers) u64 = {
 	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
-	return loader::run(path): u64;
+	const id = loader::run(path): u64;
+	inherit_redirect(id);
+	return id;
+};
+
+// A program started while the output is going to a file sends its output to
+// the same file, at the end of what is already in it.
+fn inherit_redirect(id: size) void = {
+	if (id == sched::NOID) {
+		return;
+	};
+	const path = sched::redirect_path(sched::current_id());
+	if (len(path) == 0) {
+		return;
+	};
+	let place = sched::redirect_place(sched::current_id());
+	let st = fs::filestat { length = 0, isdir = false };
+	if (fs::stat(path, &st)) {
+		place = st.length;
+	};
+	sched::set_redirect(id, *(&path: *[]u8), place);
 };
 
 // The processes that are running, one per line: the number of the process
@@ -130,6 +215,22 @@ fn pslist(regs: *architecture::registers) u64 = {
 // Stops a process.
 fn killpid(regs: *architecture::registers) u64 = {
 	return if (sched::kill(regs.rdi: size)) 1 else 0;
+};
+
+// Reads a file from an offset. The offset is in the fifth register, which
+// is where the fifth argument of a call goes.
+fn readat(regs: *architecture::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	const dest = asbuf(regs.rdx: uintptr, regs.rcx: size);
+	return fs::read_at(path, regs.r8: u64, dest): u64;
+};
+
+// Writes to a file at an offset.
+fn writeat(regs: *architecture::registers) u64 = {
+	const path = asstr(regs.rdi: uintptr, regs.rsi: size);
+	const data = asstr(regs.rdx: uintptr, regs.rcx: size);
+	const b = *(&data: *[]u8);
+	return fs::write_at(path, b, regs.r8: u64): u64;
 };
 
 // Moves the calling process into a directory. A relative path is from where
@@ -162,8 +263,7 @@ fn handle(regs: *architecture::registers) uintptr = {
 		sched::retire();
 		return sched::tick(regs);
 	case WRITE =>
-		console::write_raw(regs.rdi: uintptr, regs.rsi: size);
-		regs.rax = regs.rsi;
+		regs.rax = writeout(regs);
 		return regs: uintptr;
 	case READFILE =>
 		regs.rax = readfile(regs);
@@ -173,6 +273,12 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case WRITEFILE =>
 		regs.rax = writefile(regs);
+		return regs: uintptr;
+	case APPEND =>
+		regs.rax = appendfile(regs);
+		return regs: uintptr;
+	case REDIRECT =>
+		regs.rax = redirectpath(regs);
 		return regs: uintptr;
 	case READCHR =>
 		// A keystroke goes to the shell behind the window that has the
@@ -227,6 +333,12 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case KILL =>
 		regs.rax = killpid(regs);
+		return regs: uintptr;
+	case READAT =>
+		regs.rax = readat(regs);
+		return regs: uintptr;
+	case WRITEAT =>
+		regs.rax = writeat(regs);
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;
