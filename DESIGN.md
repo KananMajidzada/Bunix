@@ -51,6 +51,58 @@ through the `block` module and learns its size, when a drive is present.
 There is no higher-half mapping yet. The kernel runs where it is loaded, at 1
 MiB, and moves once there is a reason to.
 
+Bunix can also start itself, from a disk it was installed onto. That path has
+two stages, because one sector is not enough.
+
+The boot sector lives in the first sector of the drive and is 512 bytes. It
+has to fit in one sector and below 0x7E00 in memory, which leaves it no room
+to be clever. It does two things: it asks the BIOS for the memory map, and it
+reads the second stage into 0x8000. It cannot read the kernel itself: the
+kernel is over a megabyte, and the BIOS read service only reaches the first
+megabyte of memory.
+
+The second stage is 8 KiB at 0x8000. It has its own driver for the ATA
+controller, polling the data port a sector at a time, because the BIOS read
+service cannot reach the kernel either. It loads the kernel to 1 MiB, puts the
+machine into 32-bit protected mode, builds the multiboot information
+structure, and jumps to the kernel. It has to switch to protected mode
+first: jumping into a 64-bit kernel while the CPU is still in real mode
+resets the machine, which looks exactly like a boot that does not work.
+
+The memory map is the trick that keeps the two paths the same. The boot
+sector asks the BIOS for the E820 map and writes it out in the multiboot
+form, so the kernel reads the same structure whichever way it was started.
+When the bootloader says nothing about the memory, the kernel takes the whole
+of it above the kernel to be there to be used.
+
+The disk layout is:
+
+	sector 0        the boot sector, with a partition table
+	sector 1        the second stage
+	sector 2048     the kernel
+	sector 6144     the filesystem
+
+The boot sector keeps a record of where the kernel and the filesystem are, so
+the kernel can find the filesystem on a disk it did not write itself.
+
+## Installing
+
+Everything the installer needs is a file: `/dev/bootsec` holds the boot
+sector, `/dev/stage2` holds the second stage, and `/dev/kernel` holds the
+kernel. The kernel folds the first two into itself as byte tables, so a
+machine can be given the means to install itself.
+
+The installer is text, and it asks before it writes. It says how big the disk
+is, how big the kernel is, and where the two will go, and waits for a yes.
+Answering no leaves the disk as it was. There is no second stage of the
+install, and no separate program to copy onto a floppy: the installer is a
+program like any other, and it is run from the shell.
+
+The kernel is over a megabyte, so it cannot be held in memory and written in
+one go. The `readat` and `writeat` calls move a file a piece at a time, from
+an offset, and the installer uses them to copy the kernel onto the disk
+without ever holding all of it.
+
 ## Storage
 
 An ATA PIO driver in `block/` talks to the primary IDE controller on the
@@ -163,8 +215,8 @@ stripped to its last element — and starts it in the caller's namespace, so it
 opens the same files the caller would. If no image matches, the shell image
 runs instead, so the built-ins and the single-image commands are unaffected.
 
-A `/bin` that programs are discovered through, and a C compiler driver that
-compiles against the shim, are still to come.
+A `/bin` that programs are discovered through is there now, and so is a C
+compiler driver that compiles against the shim.
 
 ## The shell
 
@@ -191,9 +243,17 @@ looked at this way, since the text of a write is not a path and a `*` in it
 is just a `*`. A word that matches nothing is left as it was, so the program
 can say that it cannot find it.
 
-There is no redirection and no pipe yet. Both want a descriptor per process
-that the kernel knows about, and the native interface moves whole files
-rather than bytes, so there is nowhere for a pipe to sit.
+The output of a command can be sent to a file, with `>` to start the file
+over and with `>>` to add to what is in it. The redirection is done by the
+kernel rather than by the shell, because the shell is not the only thing
+whose output can be redirected: a program with an image of its own writes
+through the same call. The kernel keeps the file and the place in it per
+thread, and a program started while the output is going to a file inherits
+it, so `ls /usr > /tmp/list` puts the listing of the directory in the file,
+and not just the echo of it.
+
+There is still no pipe. A pipe wants two ends and something in the middle,
+and the kernel moves whole files rather than bytes.
 
 ## Conventions
 
@@ -229,6 +289,15 @@ start with a slash is looked for from where the process is, and `cd` and
 `pwd` say so. The shell has a history the arrow keys walk, aliases, and an
 environment of its own.
 
+Done also: a boot from a real disk. A boot sector and a second stage that
+put the kernel on a drive and start it, and an installer that does the
+writing and asks before it writes. The kernel, the second stage and the boot
+sector are files in the kernel, so the machine can install itself.
+
+Done also: the output of a command can be sent to a file, with `>` and
+`>>`, for the commands the shell has built in and for the programs that have
+an image of their own.
+
 Started: the port environment. A POSIX shim in userspace gives the user program
 `open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
 `wc`, `grep`, and `cp` are written against it, and each is a loadable image of
@@ -248,3 +317,6 @@ Next: a C compiler driver for the port environment.
 7. A filesystem with persistence. [done]
 8. A working directory for every process, and a shell that follows it.
    [done]
+9. A boot from a disk: a boot sector, a second stage, and an installer.
+   [done]
+10. Output redirection. [done]

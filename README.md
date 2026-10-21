@@ -49,12 +49,14 @@ history and a few aliases, and the arrow keys walk the history.
 The commands of the shell itself are `cat`, `cd`, `pwd`, `echo`, `write`,
 `mkdir`, `touch`, `rm`, `hd`, `cc`, `env`, `export`, `unset`, `alias`,
 `unalias`, `history`, `which`, `man`, `uptime`, `free`, `sleep`, `clear`,
-`true`, `false`, `user`, `multi`, `version`, `help` and `exit`.
+`true`, `false`, `user`, `multi`, `version`, `help`, `halt` and `exit`.
 
 The programs with an image of their own are found through `/bin` and are run
 by name: `ls`, `sort`, `uniq`, `head`, `tail`, `tr`, `rev`, `seq`, `expr`,
 `basename`, `dirname`, `stat`, `du`, `df`, `test`, `find`, `tree`, `grep`,
-`wc`, `cp`, `hello`, `cc`, `tcc` and `mei`.
+`wc`, `cp`, `mv`, `nl`, `cut`, `paste`, `comm`, `diff`, `od`, `strings`,
+`cksum`, `file`, `uname`, `id`, `split`, `ps`, `kill`, `install`, `hello`,
+`cc`, `tcc` and `mei`.
 
 A name with a `*` in it is looked for, so a command that takes paths can be
 given a pattern:
@@ -65,6 +67,49 @@ given a pattern:
 	stdarg.h
 	stdbool.h
 	...
+
+The output of a command can be sent to a file, with `>` to start the file
+over and with `>>` to add to what is already in it:
+
+	ush> ls /usr/include > /tmp/list
+	ush> cat /tmp/list | wc -l
+	44
+
+## Installing on a disk
+
+Bunix can put itself on a disk. Give the machine a disk and run `install`:
+
+	ush> install
+	Bunix installer.
+
+	The disk has 131072 sectors of 512 bytes.
+	The kernel is 1369472 bytes, which is 2675 sectors.
+
+	The disk will be made like this:
+	  the kernel, at sector 2048
+	  the filesystem, at sector 6144
+
+	Write to the disk? (yes/no) yes
+	Writing the boot sector... done.
+	Writing the second stage... done.
+	Writing the kernel... done.
+
+	Bunix is on the disk. Take it out, put it in the machine
+	you want, and start it from the disk.
+
+Nothing is written until the answer is yes, and answering no leaves the disk
+as it was. The installer asks no questions that it does not need answered,
+because everything it needs is a file: the boot sector is `/dev/bootsec`, the
+second stage is `/dev/stage2`, and the kernel is `/dev/kernel`.
+
+After that the disk boots on its own:
+
+	qemu-system-x86_64 -m 256 -drive file=disk.img,format=raw,if=ide -boot c \
+		-serial stdio
+
+The boot sector hands the memory map to the kernel in the multiboot form, so
+the kernel does not care whether it was started by a multiboot loader or by
+the boot sector: it reads the same map either way.
 
 ## Build
 Needs `hare`, `qbe`, `as` and `ld` on your PATH.
@@ -86,3 +131,5 @@ To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 
 	qemu-system-x86_64 -m 256 -kernel bunix.bin -serial stdio \
 		-drive file=disk.img,format=raw,if=ide
+
+The disk is a file, so a copy of it is a copy of everything on it.
