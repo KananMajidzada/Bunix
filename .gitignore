@@ -4,6 +4,7 @@ bunix.bin
 user/blob.ha
 user/progs.ha
 user/progs.s
+user/bootsec.ha
 userland/rt/libc.a
 userland/rt/*.o
 userland/rt/*.ha.o

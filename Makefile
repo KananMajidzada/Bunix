@@ -13,7 +13,7 @@ PROGS = hello wc grep cp cc test_c tcc mei \
 	ls sort uniq head tail tr rev seq expr basename dirname \
 	stat du df test find tree \
 	mv nl cut paste comm diff od strings cksum file uname id split \
-	ps kill
+	ps kill install
 
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))
@@ -28,7 +28,7 @@ all: bunix.bin
 # The kernel is a freestanding Hare program. HAREPATH is pointed at the tree
 # itself so the build only sees our runtime and modules.
 bunix: user/blob.ha user/progs.ha user/progs.s user/hdrs.ha user/src.ha \
-       user/crt.ha user/libc.ha $(SRCS)
+       user/crt.ha user/libc.ha user/bootsec.ha $(SRCS)
 	HAREPATH=. $(HARE) build -F -a$(ARCH) -o $@
 
 # QEMU's built-in Multiboot loader only accepts 32-bit ELF, so hand it a flat
@@ -76,6 +76,33 @@ user/hdrs.ha: $(wildcard $(TCC_DIR)/include/*.h) $(wildcard userland/rt/*.h) \
 
 user/src.ha: $(wildcard $(TCC_DIR)/examples/*.c) tools/embed.py
 	python3 tools/embed.py $(TCC_DIR)/examples $@ src
+
+# The boot sector that puts Bunix on a disk, and the second stage that goes
+# with it. They are folded into the kernel, so that the machine can install
+# itself.
+build/bootsec.elf: boot/bootsec.S boot/bootsec.ld
+	@mkdir -p build
+	$(AS) --32 -o build/bootsec.o boot/bootsec.S
+	$(LD) -m elf_i386 -T boot/bootsec.ld -o $@ build/bootsec.o
+
+build/bootsec.bin: build/bootsec.elf
+	$(OBJCOPY) -O binary $< $@
+
+build/stage2.elf: boot/stage2.S boot/stage2.ld
+	@mkdir -p build
+	$(AS) --32 -o build/stage2.o boot/stage2.S
+	$(LD) -m elf_i386 -T boot/stage2.ld -o $@ build/stage2.o
+
+build/stage2.bin: build/stage2.elf
+	$(OBJCOPY) -O binary $< $@
+
+user/bootsec.ha: build/bootsec.bin build/stage2.bin
+	@{ printf 'export const bootsec: [%s]u8 = [' "$$(wc -c < build/bootsec.bin)"; \
+	   od -An -tu1 -v build/bootsec.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
+	   printf '];\n'; \
+	   printf 'export const stage2: [%s]u8 = [' "$$(wc -c < build/stage2.bin)"; \
+	   od -An -tu1 -v build/stage2.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
+	   printf '];\n'; } > $@
 
 # Each named program is built from its own directory against the shared runtime.
 build/elf_%: $(USER_SRCS)
@@ -201,6 +228,7 @@ run-nographic: bunix.bin
 	$(QEMU) -m 256 -kernel bunix.bin -display none -serial stdio
 
 clean:
-	rm -rf bunix bunix.bin build user/blob.ha user/progs.ha user/progs.s
+	rm -rf bunix bunix.bin build user/blob.ha user/progs.ha user/progs.s \
+	user/bootsec.ha
 
 .PHONY: all run run-nographic clean
