@@ -86,11 +86,29 @@ export @symbol("main") fn main() void = {
 		tb += bytes;
 		tl += lines;
 		tw += wds;
-		show(show_lines, show_words, show_bytes, lines, wds, bytes, path);
+		// The name of the file is worth saying when there is more than
+		// one of them, and the file a pipe made is not worth naming.
+		const named = n - first > 1 || !is_pipe(path);
+		show(show_lines, show_words, show_bytes, lines, wds, bytes, path, named);
 	};
 	if (n - first > 1) {
-		show(show_lines, show_words, show_bytes, tl, tw, tb, *(&"total": *[]u8));
+		show(show_lines, show_words, show_bytes, tl, tw, tb,
+			*(&"total": *[]u8), true);
 	};
+};
+
+// Whether a file is the one a pipe put a command's output in.
+fn is_pipe(name: []u8) bool = {
+	const prefix = *(&"/dev/pipe": *[]u8);
+	if (len(name) < len(prefix)) {
+		return false;
+	};
+	for (let i = 0z; i < len(prefix); i += 1) {
+		if (name[i] != prefix[i]) {
+			return false;
+		};
+	};
+	return true;
 };
 
 fn show(
@@ -101,18 +119,32 @@ fn show(
 	words: u64,
 	bytes: u64,
 	name: []u8,
+	named: bool,
 ) void = {
+	let any = false;
 	if (sl) {
 		rt::printnum(lines);
-		rt::print(" ");
+		any = true;
 	};
 	if (sw) {
+		if (any) {
+			rt::print(" ");
+		};
 		rt::printnum(words);
-		rt::print(" ");
+		any = true;
 	};
 	if (sc) {
+		if (any) {
+			rt::print(" ");
+		};
 		rt::printnum(bytes);
-		rt::print(" ");
+		any = true;
 	};
-	rt::println(*(&name: *str));
+	if (named) {
+		if (any) {
+			rt::print(" ");
+		};
+		rt::write(name);
+	};
+	rt::println("");
 };

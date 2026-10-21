@@ -1,23 +1,35 @@
 use lib;
 use rt;
 
-const L_FLAG: str = "-l";
-
 // Lists the entries of a directory. With -l each entry is shown with what it
-// is and how big it is.
+// is and how big it is, and with -R the directories are looked into as well.
 export @symbol("main") fn main() void = {
 	const a = rt::arg();
 	const line = *(&a: *[]u8);
 	let words: [lib::MAXWORDS][]u8 = [[]...];
 	const n = lib::split(line, &words);
 	let long = false;
+	let deep = false;
 	let paths: [lib::MAXWORDS][]u8 = [[]...];
 	let npath = 0z;
 	for (let i = 0z; i < n; i += 1) {
 		const w = words[i];
-		if (lib::str_eq(w, *(&L_FLAG: *[]u8))) {
-			long = true;
-			continue;
+		if (len(w) > 1 && w[0] == ('-': u8)) {
+			// The flags come before the names of the files, and more
+			// than one of them can be in the same word.
+			let ok = true;
+			for (let j = 1z; j < len(w); j += 1) {
+				if (w[j] == ('l': u8)) {
+					long = true;
+				} else if (w[j] == ('R': u8)) {
+					deep = true;
+				} else {
+					ok = false;
+				};
+			};
+			if (ok) {
+				continue;
+			};
 		};
 		if (npath < lib::MAXWORDS) {
 			paths[npath] = w;
@@ -32,7 +44,7 @@ export @symbol("main") fn main() void = {
 		npath = 1;
 	};
 	for (let i = 0z; i < npath; i += 1) {
-		list(paths[i], long, npath > 1);
+		list(paths[i], long, npath > 1, deep);
 	};
 };
 
@@ -87,7 +99,7 @@ fn show_file(path: []u8) void = {
 // The names of a directory, one per line. A path that is not a directory is
 // listed as itself, the way a listing of one file works. When there is more
 // than one path, a directory says which one it is.
-fn list(path: []u8, long: bool, many: bool) void = {
+fn list(path: []u8, long: bool, many: bool, deep: bool) void = {
 	if (!rt::isdir(*(&path: *str))) {
 		if (!rt::exists(*(&path: *str))) {
 			rt::print("ls: no such file: ");
@@ -124,8 +136,30 @@ fn list(path: []u8, long: bool, many: bool) void = {
 					rt::write(name);
 					rt::println("");
 				};
+				if (deep) {
+					descend(path, name, long);
+				};
 			};
 			start = i + 1;
 		};
 	};
+};
+
+// Looks into a directory that is in a directory, when the listing is to be
+// of everything below it. The path is put in a buffer of its own, because
+// the buffer the name is joined in is used again by the listing below.
+fn descend(dir: []u8, name: []u8, long: bool) void = {
+	const full = join(dir, name);
+	if (!rt::isdir(*(&full: *str))) {
+		return;
+	};
+	let sub: [512]u8 = [0...];
+	let n = 0z;
+	for (let i = 0z; i < len(full) && n < len(sub); i += 1) {
+		sub[n] = full[i];
+		n += 1;
+	};
+	rt::write(sub[..n]);
+	rt::println(":");
+	list(sub[..n], long, false, true);
 };

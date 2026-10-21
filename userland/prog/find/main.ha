@@ -8,18 +8,36 @@ let bufs: [MAXDEPTH][512]u8 = [[0...], [0...], [0...], [0...], [0...],
 	[0...], [0...]];
 
 // Walks a tree and prints every path whose name matches the pattern. A * in
-// the pattern stands for any run of characters.
+// the pattern stands for any run of characters. The pattern is given with
+// -name, and a pattern on its own is taken for one as well.
 export @symbol("main") fn main() void = {
 	const a = rt::arg();
 	const arg = *(&a: *[]u8);
 	let words: [lib::MAXWORDS][]u8 = [[]...];
 	const n = lib::split(arg, &words);
 	if (n < 1) {
-		rt::println("usage: find <path> <pattern>");
+		rt::println("usage: find <path> [-name <pattern>]");
 		return;
 	};
 	const path = words[0];
-	const pat = if (n > 1) words[1] else *(&"*": *[]u8);
+	let pat: []u8 = *(&"*": *[]u8);
+	let gotpat = false;
+	for (let i = 1z; i < n; i += 1) {
+		const w = words[i];
+		if (lib::str_eq(w, *(&"-name": *[]u8))) {
+			if (i + 1 < n) {
+				i += 1;
+				pat = words[i];
+				gotpat = true;
+			};
+			continue;
+		};
+		// A pattern that was not named with -name is still a pattern.
+		if (!gotpat) {
+			pat = w;
+			gotpat = true;
+		};
+	};
 	if (!rt::exists(*(&path: *str))) {
 		rt::print("find: no such path: ");
 		rt::println(*(&path: *str));

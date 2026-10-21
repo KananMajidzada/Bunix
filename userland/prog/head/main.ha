@@ -14,6 +14,15 @@ export @symbol("main") fn main() void = {
 	let have = false;
 	for (let i = 0z; i < n; i += 1) {
 		const w = words[i];
+		// The number of lines can be put right after the dash.
+		if (len(w) > 1 && w[0] == ('-': u8)
+				&& w[1] >= ('0': u8) && w[1] <= ('9': u8)) {
+			let v: u64 = 0;
+			if (lib::number(w[1..], &v) > 0) {
+				count = v;
+				continue;
+			};
+		};
 		if (lib::str_eq(w, *(&N_FLAG: *[]u8))) {
 			// The number of lines comes next.
 			if (i + 1 >= n) {

@@ -2,24 +2,27 @@ use lib;
 use rt;
 
 // Splits a file into pieces of a given number of lines. The pieces are
-// named after the file, with a letter on the end.
+// named after the file, with a letter on the end, unless a name to put in
+// front of the letters is given.
 export @symbol("main") fn main() void = {
 	const a = rt::arg();
 	const arg = *(&a: *[]u8);
 	let words: [lib::MAXWORDS][]u8 = [[]...];
 	const n = lib::split(arg, &words);
 	if (n < 1) {
-		rt::println("usage: split [-l lines] <path>");
+		rt::println("usage: split [-l lines] <path> [prefix]");
 		return;
 	};
 	let per: u64 = 1000;
 	let path: []u8 = words[0][0..0];
+	let prefix: []u8 = words[0][0..0];
 	let have = false;
+	let haveprefix = false;
 	for (let i = 0z; i < n; i += 1) {
 		const w = words[i];
 		if (lib::str_eq(w, *(&"-l": *[]u8))) {
 			if (i + 1 >= n) {
-				rt::println("usage: split [-l lines] <path>");
+				rt::println("usage: split [-l lines] <path> [prefix]");
 				return;
 			};
 			i += 1;
@@ -34,10 +37,16 @@ export @symbol("main") fn main() void = {
 		if (!have) {
 			path = w;
 			have = true;
+			continue;
+		};
+		// The word after the file is the name the pieces are given.
+		if (!haveprefix) {
+			prefix = w;
+			haveprefix = true;
 		};
 	};
 	if (!have) {
-		rt::println("usage: split [-l lines] <path>");
+		rt::println("usage: split [-l lines] <path> [prefix]");
 		return;
 	};
 	const window = rt::page_alloc(16);
@@ -52,11 +61,13 @@ export @symbol("main") fn main() void = {
 		rt::println(*(&path: *str));
 		return;
 	};
-	// The name of a piece: the name of the file, and a letter on the end.
+	// The name of a piece: the name that was asked for, or the name of the
+	// file, and a letter on the end.
 	let name: [64]u8 = [0...];
 	let nl = 0z;
-	for (let i = 0z; i < len(path) && nl + 2 < len(name); i += 1) {
-		name[nl] = path[i];
+	const base = if (haveprefix) prefix else path;
+	for (let i = 0z; i < len(base) && nl + 2 < len(name); i += 1) {
+		name[nl] = base[i];
 		nl += 1;
 	};
 	// The lines are counted, and a piece is written every so often.
