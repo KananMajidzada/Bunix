@@ -22,10 +22,16 @@ const KERNEL: str = "/dev/kernel";
 const BOOTSEC: str = "/dev/bootsec";
 const STAGE2: str = "/dev/stage2";
 
+// The record the kernel writes about the disk, which says how big the disk
+// is and where the filesystem on it is.
+let drec: [256]u8 = [0...];
+let drecn: size = 0;
+
 export @symbol("main") fn main() void = {
 	rt::println("Bunix installer.");
 	rt::println("");
 
+	read_disk();
 	const nsect = disk_sectors();
 	if (nsect == 0) {
 		rt::println("There is no disk attached.");
@@ -47,9 +53,19 @@ export @symbol("main") fn main() void = {
 	rt::printnum(ksect);
 	rt::println(" sectors.");
 
-	// The filesystem goes after the kernel, at the next megabyte.
-	let dstart = KERNLBA + ksect;
-	dstart = (dstart + (ALIGN - 1)) / ALIGN * ALIGN;
+	// The filesystem stays where the kernel has already put it. Moving it
+	// would mean copying every file on the disk, and there is nothing to
+	// gain from it: the kernel is written before the filesystem begins.
+	const dstart = disk_filesystem();
+	if (dstart == 0) {
+		rt::println("The filesystem cannot be found on the disk.");
+		return;
+	};
+	if (KERNLBA + ksect > dstart) {
+		rt::println("The kernel is too big for the room before the");
+		rt::println("filesystem. The disk cannot hold Bunix.");
+		return;
+	};
 	if (dstart >= nsect) {
 		rt::println("The disk is too small to hold Bunix.");
 		return;
@@ -133,22 +149,50 @@ export @symbol("main") fn main() void = {
 	rt::println("you want, and start it from the disk.");
 };
 
+// Reads the record the kernel keeps about the disk.
+fn read_disk() void = {
+	drecn = rt::readfile("/proc/disk", drec[..]);
+};
+
 // How many sectors the disk has, or zero when there is none.
 fn disk_sectors() u64 = {
-	let buf: [128]u8 = [0...];
-	const n = rt::readfile("/proc/disk", buf[..]);
-	if (n == 0) {
-		return 0;
-	};
-	// The first number in the record is the number of sectors.
+	return number_after("sectors ");
+};
+
+// Where the filesystem on the disk begins.
+fn disk_filesystem() u64 = {
+	return number_after("filesystem at ");
+};
+
+// The number that follows a word in the record.
+fn number_after(word: str) u64 = {
+	const w = *(&word: *[]u8);
 	let i = 0z;
-	for (i < n && (buf[i] < ('0': u8) || buf[i] > ('9': u8))) {
+	for (i < drecn) {
+		if (i + len(w) <= drecn) {
+			let same = true;
+			for (let j = 0z; j < len(w); j += 1) {
+				if (drec[i + j] != w[j]) {
+					same = false;
+					break;
+				};
+			};
+			if (same) {
+				i += len(w);
+				break;
+			};
+		};
 		i += 1;
 	};
 	let v: u64 = 0;
-	for (i < n && buf[i] >= ('0': u8) && buf[i] <= ('9': u8)) {
-		v = v * 10 + ((buf[i] - ('0': u8)): u64);
+	let any = false;
+	for (i < drecn && drec[i] >= ('0': u8) && drec[i] <= ('9': u8)) {
+		v = v * 10 + ((drec[i] - ('0': u8)): u64);
 		i += 1;
+		any = true;
+	};
+	if (!any) {
+		return 0;
 	};
 	return v;
 };

@@ -142,8 +142,20 @@ let mntroot: size = 0;
 // Where the filesystem on the disk begins. A disk that has been installed
 // on has a partition table at the front of it, and the installer leaves a
 // record saying where the filesystem is; a disk that has not been installed
-// on has the filesystem at the front of it.
+// on has the filesystem after the kernel, where the boot sector and the
+// kernel itself will not reach it.
 let sb_sect: u32 = 0;
+
+// The first sector the filesystem is at on a disk that has not been
+// installed on. It is the first megabyte boundary after the kernel image,
+// which starts at 1 MiB. The boot sector goes at the front of the disk and
+// the kernel goes at 2048, so the filesystem has to be past both of them,
+// or installing Bunix would write over the files.
+fn default_sect() u32 = {
+	const end = rt::image_base() + rt::image_size();
+	const aligned = (end + 0xFFFFF) & ~0xFFFFF;
+	return (aligned / 512): u32;
+};
 
 // The record the installer leaves at the front of the disk.
 def RECOFF: size = 0x180;
@@ -443,6 +455,13 @@ fn gen_disk(buf: []u8) size = {
 	n += put_str(buf[n..], if (block::present_drive()) "present" else "absent");
 	buf[n] = '\n': u8;
 	n += 1;
+	// Where the filesystem is, so that the installer can say so in the
+	// record it leaves at the front of the disk, and the filesystem does
+	// not have to be moved when Bunix is installed.
+	n += put_str(buf[n..], "filesystem at ");
+	n += put_num(buf[n..], sb_sect: u64);
+	buf[n] = '\n': u8;
+	n += 1;
 	return n;
 };
 
@@ -685,7 +704,10 @@ fn dmount() void = {
 	nodes[mntroot].dblock = DROOT;
 	link(root, mntroot);
 	// The record at the front of the disk says where the filesystem is.
+	// Without one the filesystem goes after the kernel, where installing
+	// Bunix will not write over it.
 	let rec: [512]u8 = [0...];
+	sb_sect = default_sect();
 	if (block::read(0, rec[..])) {
 		if (rec[RECOFF] == 'B' && rec[RECOFF + 1] == 'U'
 				&& rec[RECOFF + 2] == 'N' && rec[RECOFF + 3] == 'I'
