@@ -59,6 +59,12 @@ void __libc_start(char *buf, size_t len) {
         while (i < len && buf[i] != ' ') i++;
         if (i < len) buf[i++] = 0;
     }
+    /* The last argument ends at the end of the buffer, so the loop above had
+       no byte left to overwrite with the terminator. A missing one reads past
+       the payload into whatever the page it shares held before, which is how
+       "cc -o /tmp/x /tmp/hi.c" came to compile a file named
+       "/tmp/hi.c/usr/lib". */
+    if (argc > 1) buf[len] = 0;
     argv[argc] = NULL;
 
     exit(main(argc, argv));

@@ -106,7 +106,10 @@ fn finish(
 	fresh: bool,
 	cmd: []u8,
 ) size = {
-	if (len(payload) > MAXARG) {
+	// One byte of the argument page is left for the terminator the C runtime
+	// puts at the end of the last argument, so a payload filling the page
+	// exactly would have nowhere to put it.
+	if (len(payload) >= MAXARG) {
 		return sched::NOID;
 	};
 	for (let i = 0u64; i < STACK_PAGES; i += 1) {
@@ -124,6 +127,10 @@ fn finish(
 	for (let i = 0z; i < len(payload); i += 1) {
 		*((aframe + (i: uintptr)): *u8) = payload[i];
 	};
+	// The C runtime splits this string in place and terminates each argument
+	// as it goes, which needs a byte at the very end that the payload itself
+	// does not hold.
+	*((aframe + (len(payload): uintptr)): *u8) = 0;
 	const id = sched::spawn_user(
 		entry: uintptr,
 		STACK_TOP: uintptr,
