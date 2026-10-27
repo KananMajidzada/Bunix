@@ -87,6 +87,8 @@ let gwx = 0z;
 let gwy = 0z;
 let gww = 0z;
 let gwh = 0z;
+let grx = 0z;	// pointer where the resize grab began
+let gry = 0z;
 let fmode: u8 = 0;	// 1 move, 2 resize, driven from the menu
 let sbdrag = false;
 let sbwin: size = NONE;
@@ -223,8 +225,15 @@ fn draw_scrollbar(wi: size) void = {
 		};
 		const span = sh - th;
 		const maxtop = wins[wi].total - wins[wi].rows;
-		const ty = if (span > 0) sby(wi) + span * wins[wi].top / maxtop
+		let ty = if (span > 0) sby(wi) + span * wins[wi].top / maxtop
 			else sby(wi);
+		// The view can be one line past where the thumb belongs right after
+		// a resize (the size clamp in apply_size runs before the next
+		// write), and a thumb drawn past the track would spill over the
+		// frame and the desktop.
+		if (ty > sby(wi) + span) {
+			ty = sby(wi) + span;
+		};
 		fb::fill(sbx(wi) + 1, ty, SB - 2, th, THUMB);
 	};
 };
@@ -619,6 +628,12 @@ fn begin_resize(wi: size, e: u8) void = {
 	gwy = wins[wi].wy;
 	gww = wins[wi].ww;
 	gwh = wins[wi].wh;
+	// The size follows the pointer from wherever the grab began. Taking the
+	// pointer's absolute position instead would make the window jump as soon
+	// as the button went down, because an edge is grabbed a pixel or two
+	// inside the frame and the size would snap to that.
+	grx = mx;
+	gry = my;
 };
 
 fn move_drag() void = {
@@ -639,6 +654,18 @@ fn apply_size(wi: size, nc: size, nr: size, nwx: size, nwy: size) void = {
 	layout(wi);
 	wins[wi].wx = nwx;
 	wins[wi].wy = nwy;
+	// The view was at most (total - rows) lines down, but rows just changed.
+	// A taller window makes that bound smaller than where the view still
+	// sits, and the scrollbar would then place its thumb past the end of
+	// the track, outside the window. Pull the view back inside the buffer
+	// before anything is drawn.
+	if (wins[wi].total > wins[wi].rows) {
+		if (wins[wi].top > wins[wi].total - wins[wi].rows) {
+			wins[wi].top = wins[wi].total - wins[wi].rows;
+		};
+	} else {
+		wins[wi].top = 0;
+	};
 	if (wins[wi].top + wins[wi].rows > HIST) {
 		wins[wi].top = if (HIST > wins[wi].rows) HIST - wins[wi].rows else 0;
 	};
@@ -665,19 +692,21 @@ fn resize_drag() void = {
 	const py = my: int;
 	const rx1 = (gwx + gww): int;
 	const ry1 = (gwy + gwh): int;
+	// Each edge follows the pointer by how far it has moved since the grab,
+	// so pressing on an edge does not resize anything on its own.
 	let nww = gww: int;
 	let nwh = gwh: int;
 	if ((gedge & 1) != 0) {
-		nww = rx1 - px;
+		nww = (gww: int) - (px - (grx: int));
 	};
 	if ((gedge & 2) != 0) {
-		nww = px - (gwx: int);
+		nww = (gww: int) + (px - (grx: int));
 	};
 	if ((gedge & 4) != 0) {
-		nwh = ry1 - py;
+		nwh = (gwh: int) - (py - (gry: int));
 	};
 	if ((gedge & 8) != 0) {
-		nwh = py - (gwy: int);
+		nwh = (gwh: int) + (py - (gry: int));
 	};
 	if (nww < minw) {
 		nww = minw;
@@ -744,6 +773,8 @@ fn menu_activate(sel: int) void = {
 		gwy = wins[wi].wy;
 		gww = wins[wi].ww;
 		gwh = wins[wi].wh;
+		grx = mx;
+		gry = my;
 	} else if (sel == 2) {
 		if (wi == NONE) {
 			return;
