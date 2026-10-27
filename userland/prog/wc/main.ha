@@ -16,10 +16,11 @@ export @symbol("main") fn main() void = {
 	let show_words = false;
 	let show_bytes = false;
 	let first = 0z;
+	// Every leading word starting with '-' is a flag group, so
+	// "-l -w -c" and "-lwc" mean the same thing.
 	for (let i = 0z; i < n; i += 1) {
 		const w = words[i];
-		if (i == 0 && len(w) > 1 && w[0] == ('-': u8)) {
-			// The flags come before the names of the files.
+		if (len(w) > 1 && w[0] == ('-': u8)) {
 			let ok = true;
 			for (let j = 1z; j < len(w); j += 1) {
 				if (w[j] == ('l': u8)) {
@@ -35,10 +36,14 @@ export @symbol("main") fn main() void = {
 			if (ok) {
 				continue;
 			};
-			// Not a flag after all, so it is a name of a file.
-			first = 0z;
-			break;
+			if (i + 1 == n) {
+				// A lone unknown flag with no file after it.
+				rt::println("usage: wc [-lwc] [file ...]");
+				return;
+			};
 		};
+		// The first word that is not a flag is a name of a file, and
+		// everything after it is too.
 		first = i;
 		break;
 	};
