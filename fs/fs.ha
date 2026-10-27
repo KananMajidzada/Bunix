@@ -889,7 +889,16 @@ export fn ns_install(id: size, fresh: bool) void = {
 	};
 };
 
-// Frees the private nodes of a dead process; the shared binds stay put.
+// Frees the private nodes of a dead process; the shared binds stay put. A bind
+// is a whole tree the namespace does not own, so freeing one would take the
+// files away from every other namespace too: /usr and /bin went missing from
+// the shell once the first `user` program had exited, because its /usr and
+// /bin were freed along with its own /tmp.
+fn bound(id: size) bool = {
+	return id == devroot || id == procroot || id == usrroot
+		|| id == binroot;
+};
+
 export fn ns_reap(id: size) void = {
 	if (id >= MAXNS || !nss[id].owned) {
 		return;
@@ -898,7 +907,7 @@ export fn ns_reap(id: size) void = {
 	const nd = &nodes[r];
 	for (let i = 0z; i < nd.nchild; i += 1) {
 		const c = nd.children[i];
-		if (c != devroot && c != procroot) {
+		if (!bound(c)) {
 			free_tree(c);
 		};
 	};
