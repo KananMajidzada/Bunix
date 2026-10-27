@@ -1462,7 +1462,11 @@ fn put_into(out: []u8, at: *size, s: []u8) void = {
 // flags are spelled out once here rather than at every prompt.
 fn cc_line(args: []u8) void = {
 	const head: str = "tcc ";
-	const flags: str = "-static -nostdlib -B/usr/lib -L/usr/lib -I/usr/include";
+	// The space at the end of this is load bearing: args is put in right
+	// after it, and without the space the two join into one token and tcc
+	// reads "-I/usr/include-o ..." as a single include path, leaving the
+	// output name to be taken for an input file.
+	const flags: str = "-static -nostdlib -B/usr/lib -L/usr/lib -I/usr/include ";
 	const crt1: str = " /usr/lib/crt1.o";
 	const crti: str = " /usr/lib/crti.o";
 	const libc: str = " /usr/lib/libc.a";
@@ -1486,11 +1490,16 @@ fn run_cc(rest: []u8) void = {
 		return;
 	};
 	const gap: str = " ";
+	// tcc is always given -o, so an output name has to be there even when
+	// none was asked for.
+	const defout: str = "a.out";
 	let outp: [256]u8 = [0...];
 	let outn = 0z;
+	put_into(outp[..], &outn, *(&defout: *[]u8));
 	let srcs: [400]u8 = [0...];
 	let n = 0z;
 	let i = 0z;
+	let want_out = false;
 	for (true) {
 		for (i < len(rest) && (rest[i] == (' ': u8) || rest[i] == ('\t': u8))) {
 			i += 1;
@@ -1503,7 +1512,24 @@ fn run_cc(rest: []u8) void = {
 			break;
 		};
 		const tok = rest[start..i];
-		if (len(tok) > 2 && tok[0] == ('-': u8) && (tok[1] == ('o': u8) || tok[1] == ('O': u8))) {
+		// -o name, and the shorter -oname, both mean the same thing.
+		if (want_out) {
+			want_out = false;
+			let k = len(tok);
+			if (k > len(outp)) {
+				k = len(outp);
+			};
+			for (let j = 0z; j < k; j += 1) {
+				outp[j] = tok[j];
+			};
+			outn = k;
+			continue;
+		};
+		if (str_eq(tok, "-o")) {
+			want_out = true;
+			continue;
+		};
+		if (len(tok) > 2 && tok[0] == ('-': u8) && tok[1] == ('o': u8)) {
 			const v = tok[2..];
 			let k = len(v);
 			if (k > len(outp)) {
