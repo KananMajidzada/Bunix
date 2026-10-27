@@ -1226,6 +1226,10 @@ fn tut_machine() void = {
 	rt::println("");
 	rt::println("install puts Bunix on a disk and asks before it writes. halt");
 	rt::println("stops it.");
+	rt::println("");
+	rt::println("A disk you start Bunix from is mounted at /mnt. The rest is in");
+	rt::println("memory, so a file you put in /mnt is the one that is still there");
+	rt::println("the next time the machine starts.");
 };
 
 // Waits for a number of seconds.
