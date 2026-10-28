@@ -9,7 +9,7 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c tcc mei \
+PROGS = hello wc grep cp cc test_c fbtest tcc mei \
 	ls sort uniq head tail tr rev seq expr basename dirname \
 	stat du df test find tree \
 	mv nl cut paste comm diff od strings cksum file uname id split \
@@ -18,7 +18,7 @@ PROGS = hello wc grep cp cc test_c tcc mei \
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))
 # Programs written in C, cross-compiled on the host by bcc.
-C_PROGS = test_c
+C_PROGS = test_c fbtest
 
 PROG_ELFS = $(addprefix build/elf_,$(PROGS))
 PROG_BINS = $(addprefix build/prog_,$(addsuffix .bin,$(PROGS)))

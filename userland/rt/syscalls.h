@@ -72,6 +72,18 @@ static inline uint64_t syscall4(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a
     return ret;
 }
 
+// The fifth argument rides in r8, which no constraint names, so a register
+// variable pins it there.
+static inline uint64_t syscall5(uint64_t n, uint64_t a1, uint64_t a2,
+                                uint64_t a3, uint64_t a4, uint64_t a5) {
+    register uint64_t r8 __asm__("r8") = a5;
+    uint64_t ret;
+    __asm__ volatile ("int $0x80" : "=a"(ret)
+                      : "a"(n), "D"(a1), "S"(a2), "d"(a3), "c"(a4), "r"(r8)
+                      : "r11", "memory");
+    return ret;
+}
+
 // Paths cross the boundary as (pointer, length), so the wrappers need the
 // length without depending on the C library.
 static inline uint64_t path_len(const char *p) {
@@ -102,6 +114,22 @@ static inline ssize_t bunix_writefile(const char *path, const void *buf, size_t 
 static inline ssize_t bunix_appendfile(const char *path, const void *buf, size_t count) {
     uint64_t n = path_len(path);
     return (ssize_t)syscall4(SYS_APPEND, (uint64_t)path, n, (uint64_t)buf, count);
+}
+
+// Reads count bytes of a file starting at byte offset off. What a file makes
+// of the offset is the file's own business: /dev/fb takes it as a pixel
+// position, and /dev/kbd is a queue and goes no further.
+static inline ssize_t bunix_readat(const char *path, uint64_t off,
+                                   void *buf, size_t count) {
+    uint64_t n = path_len(path);
+    return (ssize_t)syscall5(SYS_READAT, (uint64_t)path, n, (uint64_t)buf, count, off);
+}
+
+// Writes count bytes at byte offset off.
+static inline ssize_t bunix_writeat(const char *path, uint64_t off,
+                                    const void *buf, size_t count) {
+    uint64_t n = path_len(path);
+    return (ssize_t)syscall5(SYS_WRITEAT, (uint64_t)path, n, (uint64_t)buf, count, off);
 }
 
 // Sends the output of this process to a file instead of the console. Mode 1
