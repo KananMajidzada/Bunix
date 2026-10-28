@@ -76,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [71]entry = [
+const MANUAL: [75]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -145,6 +145,10 @@ const MANUAL: [71]entry = [
 	entry { name = "ps", help = "the processes that are running", builtin = false , paths = false },
 	entry { name = "kill", help = "stop a process", builtin = false , paths = false },
 	entry { name = "install", help = "put Bunix on a disk", builtin = false , paths = false },
+	entry { name = "hello", help = "say hello from a program of its own", builtin = false , paths = false },
+	entry { name = "mei", help = "an editor, Ctrl-S to save and quit", builtin = false , paths = false },
+	entry { name = "tcc", help = "the C compiler that cc drives", builtin = false , paths = false },
+	entry { name = "test_c", help = "test the C runtime", builtin = false , paths = false },
 	entry { name = "type", help = "say what a command is", builtin = true , paths = false },
 	entry { name = "pushd", help = "remember a directory and move", builtin = true , paths = true },
 	entry { name = "popd", help = "go back to a remembered directory", builtin = true , paths = false },
@@ -186,18 +190,6 @@ fn is_extprog(cmd: []u8) bool = {
 		};
 	};
 	return false;
-};
-
-fn help_extprog() void = {
-	for (let i = 0z; i < extprog_count; i += 1) {
-		rt::print(" ");
-		let j = 0z;
-		for (extprog_names[i][j] != 0) {
-			rt::putc(extprog_names[i][j]);
-			j += 1;
-		};
-	};
-	rt::println("");
 };
 
 export @symbol("main") fn main() void = {
@@ -552,7 +544,7 @@ fn run_command(line: []u8) bool = {
 		rt::println("bye");
 		return false;
 	} else if (str_eq(cmd, "help")) {
-		run_help(rest);
+		run_help();
 	} else if (str_eq(cmd, "tutorial")) {
 		run_tutorial(rest);
 	} else if (str_eq(cmd, "version")) {
@@ -1023,51 +1015,32 @@ fn run_man(rest: []u8) void = {
 	rt::println(MANUAL[i].help);
 };
 
-// What can be done. This is the short answer: the full list of every command
-// with its one line is behind "help all", and the walk through the system is
-// the tutorial.
-fn run_help(rest: []u8) void = {
-	if (str_eq(rest, "all")) {
-		help_all();
-		return;
+// One command, with the line that says what it does. The name is padded so
+// the words all start in the same place.
+fn help_line(e: entry) void = {
+	rt::print("  ");
+	rt::print(e.name);
+	const n = len(*(&e.name: *[]u8));
+	for (let i = n; i < 9; i += 1) {
+		rt::print(" ");
 	};
-	rt::println("bunix shell.");
-	rt::println("");
-	rt::println("Some things to try:");
-	rt::println("");
-	rt::println("  ls /bin              the programs that are here");
-	rt::println("  cat /hello           print a file");
-	rt::println("  write /tmp/a \"hi\\n\"  write one");
-	rt::println("  mkdir /tmp/d         make a directory");
-	rt::println("  cp, mv, rm           copy, move, take away");
-	rt::println("  grep, sort, wc       look inside files");
-	rt::println("  cc -o /tmp/x file.c  compile a C program");
-	rt::println("");
-	rt::println("Quotes keep words together: echo \"hi there\".");
-	rt::println("> sends output to a file, >> adds to one, and | hands it to");
-	rt::println("the next command, as in cat /tmp/a | wc -l.");
-	rt::println("The up and down arrows walk what has been run, the left and");
-	rt::println("right ones move along the line.");
-	rt::println("");
-	rt::println("  man <command>  what one command does");
-	rt::println("  tutorial       a walk through the system, a page at a time");
-	rt::println("  help all       every command there is");
+	rt::println(e.help);
 };
 
-// Every command there is, with the one line that says what it does.
-fn help_all() void = {
+// What can be done. Every command there is, and the one line that says what
+// it does; the walk through the system is the tutorial.
+fn run_help() void = {
 	rt::println("bunix shell. The commands are:");
 	for (let i = 0z; i < len(MANUAL); i += 1) {
-		if (!MANUAL[i].builtin) {
-			continue;
-		};
-		rt::print("  ");
-		rt::print(MANUAL[i].name);
-		rt::print(" - ");
-		rt::println(MANUAL[i].help);
+		help_line(MANUAL[i]);
 	};
-	rt::println("and the programs:");
-	help_extprog();
+	rt::println("");
+	rt::println("The up and down arrows walk what has been run, the left and");
+	rt::println("right ones move along the line.");
+	rt::println("A > at the end of a line sends the output to a file, a >>");
+	rt::println("adds to what is already in it, and a | hands it to the next");
+	rt::println("command, as in cat /tmp/x | wc -l.");
+	rt::println("Type tutorial for a walk through the system.");
 };
 
 // How many chapters the tutorial has, besides the opening page.
