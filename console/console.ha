@@ -171,6 +171,13 @@ export fn pollch() u8 = {
 	return 0;
 };
 
+// The next key edge for a program that draws rather than types: the scancode
+// with KEY_UP when the key was released. Zero when none is waiting. This is
+// what /dev/kbd serves.
+export fn keyev() u64 = {
+	return keyboard_keyev();
+};
+
 @init fn init() void = {
 	// The machine checks the permission for input and output against the
 	// task state segment, and there is none until it is set up.

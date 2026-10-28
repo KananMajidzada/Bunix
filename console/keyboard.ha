@@ -97,9 +97,20 @@ let rawhead: size = 0;
 let rawtail: size = 0;
 let rawn: size = 0;
 
-// Takes one scancode from the controller, or zero when there is nothing there.
-// The interrupt uses this, and a program uses it directly as a fallback for the
-// moments when interrupts are masked and no scancode could arrive otherwise.
+// Takes one scancode straight from the controller, or zero when there is
+// nothing there. This is the only place that reads the port, so a scancode is
+// handed on exactly once however many paths ask for one.
+fn take_hw() u8 = {
+	const st = architecture::inb(0x64);
+	if ((st & 1) == 0 || (st & 0x20) != 0) {
+		return 0;
+	};
+	return architecture::inb(0x60);
+};
+
+// Takes one scancode for the character reader: the ring first, since the
+// interrupt has been putting them there, and the controller only when the ring
+// is empty and interrupts are masked.
 fn take() u8 = {
 	if (rawn > 0) {
 		const sc = raw[rawhead];
@@ -107,11 +118,7 @@ fn take() u8 = {
 		rawn -= 1;
 		return sc;
 	};
-	const st = architecture::inb(0x64);
-	if ((st & 1) == 0 || (st & 0x20) != 0) {
-		return 0;
-	};
-	return architecture::inb(0x60);
+	return take_hw();
 };
 
 // Waits for the controller to take a byte, so setup does not race it.
@@ -160,10 +167,17 @@ export fn keyboard_init() void = {
 
 // Called from the keyboard interrupt.
 export fn keyboard_irq() void = {
-	const sc = take();
+	const sc = take_hw();
 	if (sc == 0) {
 		return;
 	};
+	ingest(sc);
+};
+
+// Hands one scancode to both readers of it: the character queue, which turns
+// it into a letter or an escape sequence, and the event queue, which keeps the
+// make and the break for a program that draws rather than types.
+fn ingest(sc: u8) void = {
 	if (rawn == RAW) {
 		// The reader has fallen a very long way behind. Dropping the
 		// oldest is better than losing the newest, which is what the
@@ -174,6 +188,7 @@ export fn keyboard_irq() void = {
 	raw[rawtail] = sc;
 	rawtail = (rawtail + 1) % RAW;
 	rawn += 1;
+	note_event(sc);
 };
 
 export fn keyboard_has_data() bool = {
@@ -286,4 +301,78 @@ export fn keyboard_getc() u8 = {
 		};
 		feed(sc);
 	};
+};
+
+// A program that draws rather than types needs to know which keys are down,
+// not just the characters they spell: a game holds several keys at once and
+// has to see the moment one is let go. That is the make and the break of a
+// scancode, which the character queue above throws away on its way to a
+// letter. This queue keeps those edges instead. One event packs the scancode
+// in the low byte, KEY_UP in bit 8 when the key was released, and KEY_EXT in
+// bit 9 when the scancode came after an E0 prefix (the cursor keys and the
+// right-hand Ctrl and Alt share their code with the keypad otherwise).
+export def KEY_UP: u64 = 0x100;
+export def KEY_EXT: u64 = 0x200;
+
+def KEV: size = 64;
+let kev: [KEV]u64 = [0...];
+let kevhead: size = 0;
+let kevtail: size = 0;
+let kevn: size = 0;
+// Set by the E0 that prefixes the second scancode of an extended key, for the
+// event queue's own tracking. It is separate from the character queue's ext
+// because the two are drained at different times and must not share a flag.
+let kevext = false;
+
+fn kevput(e: u64) void = {
+	if (kevn == KEV) {
+		// The reader has fallen behind. Losing the oldest edge is better
+		// than losing the newest, which is what the hardware would do.
+		kevhead = (kevhead + 1) % KEV;
+		kevn -= 1;
+	};
+	kev[kevtail] = e;
+	kevtail = (kevtail + 1) % KEV;
+	kevn += 1;
+};
+
+// Records one scancode as an edge. The E0 prefix is remembered rather than
+// queued, so an extended key arrives as a single event carrying KEY_EXT.
+fn note_event(sc: u8) void = {
+	if (sc == 0xE0) {
+		kevext = true;
+		return;
+	};
+	if (sc == 0xE1) {
+		// Pause sends E1 1D 45 E1 9D C5 and has no edge worth keeping.
+		kevext = false;
+		return;
+	};
+	const ext = kevext;
+	kevext = false;
+	const code = (sc & 0x7F): u64;
+	const up: u64 = if ((sc & 0x80) != 0) KEY_UP else 0;
+	const x: u64 = if (ext) KEY_EXT else 0;
+	kevput(code | up | x);
+};
+
+// The next key edge, or zero when none is waiting. Bit 8 set means the key
+// went up, bit 9 means it was an extended scancode.
+export fn keyboard_keyev() u64 = {
+	// Drain the controller first, so an edge that has landed since the last
+	// interrupt is not held up until the next one.
+	for (true) {
+		const sc = take_hw();
+		if (sc == 0) {
+			break;
+		};
+		ingest(sc);
+	};
+	if (kevn == 0) {
+		return 0;
+	};
+	const e = kev[kevhead];
+	kevhead = (kevhead + 1) % KEV;
+	kevn -= 1;
+	return e;
 };
