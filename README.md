@@ -50,14 +50,14 @@ The commands of the shell itself are `cat`, `cd`, `pwd`, `echo`, `write`,
 `mkdir`, `touch`, `rm`, `hd`, `cc`, `env`, `export`, `unset`, `alias`,
 `unalias`, `history`, `which`, `type`, `man`, `uptime`, `free`, `sleep`,
 `clear`, `true`, `false`, `pushd`, `popd`, `user`, `multi`, `version`,
-`help`, `halt`, `poweroff` and `exit`.
+`help`, `tutorial`, `halt`, `poweroff` and `exit`.
 
 The programs with an image of their own are found through `/bin` and are run
 by name: `ls`, `sort`, `uniq`, `head`, `tail`, `tr`, `rev`, `seq`, `expr`,
 `basename`, `dirname`, `stat`, `du`, `df`, `test`, `find`, `tree`, `grep`,
 `wc`, `cp`, `mv`, `nl`, `cut`, `paste`, `comm`, `diff`, `od`, `strings`,
 `cksum`, `file`, `uname`, `id`, `split`, `ps`, `kill`, `install`, `hello`,
-`cc`, `tcc` and `mei`.
+`cc`, `tcc`, `test_c` and `mei`.
 
 A name with a `*` in it is looked for, so a command that takes paths can be
 given a pattern:
@@ -98,6 +98,42 @@ through it.
 
 The filters take the small flags: `sort -n -r -u`, `grep -i -v -n -c`,
 `wc -l -w -c`, `comm -1 -2 -3`, `head -5`, `tail -n 5`, `cp -r`, `tr a-z A-Z`.
+
+## The tutorial
+
+`tutorial` walks through the system, a page at a time. It opens on a contents
+page:
+
+	ush> tutorial
+	Bunix tutorial
+
+	Bunix is a small Unix. It starts one program, the shell, and the
+	shell is where you work. The one idea to keep is that everything
+	you can name is a file: a directory, the disk, the kernel, the
+	memory, even a pipe.
+
+	Read a chapter with
+	  tutorial 1    where you are
+	  tutorial 2    files and directories
+	  tutorial 3    finding things
+	  tutorial 4    files that are not files
+	  tutorial 5    programs and the machine
+	  tutorial all  all five
+
+	man <command> says what one command does.
+
+A chapter is one idea, the commands that go with it, and lines to type.
+Chapter 4 is the one where the idea stops being a figure of speech:
+
+	ush> cat /proc/mem      the memory
+	ush> cat /proc/uptime   seconds since it started
+	ush> hd /dev/bootsec    the boot sector, in hex
+
+`tutorial all` prints all five in one go. Anything but a number from 1 to 5
+says what it takes:
+
+	ush> tutorial 9
+	usage: tutorial [1-5|all]
 
 ## Installing on a disk
 
