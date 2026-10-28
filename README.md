@@ -194,3 +194,12 @@ To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 		-drive file=disk.img,format=raw,if=ide
 
 The disk is a file, so a copy of it is a copy of everything on it.
+
+## Fun
+
+Right now Bunix have mascot calling "Bunora the Hare". 
+
+## Lisencing 
+
+GPL lisence
+
