@@ -552,7 +552,7 @@ fn run_command(line: []u8) bool = {
 		rt::println("bye");
 		return false;
 	} else if (str_eq(cmd, "help")) {
-		run_help();
+		run_help(rest);
 	} else if (str_eq(cmd, "tutorial")) {
 		run_tutorial(rest);
 	} else if (str_eq(cmd, "version")) {
@@ -1023,8 +1023,39 @@ fn run_man(rest: []u8) void = {
 	rt::println(MANUAL[i].help);
 };
 
-// What can be done.
-fn run_help() void = {
+// What can be done. This is the short answer: the full list of every command
+// with its one line is behind "help all", and the walk through the system is
+// the tutorial.
+fn run_help(rest: []u8) void = {
+	if (str_eq(rest, "all")) {
+		help_all();
+		return;
+	};
+	rt::println("bunix shell.");
+	rt::println("");
+	rt::println("Some things to try:");
+	rt::println("");
+	rt::println("  ls /bin              the programs that are here");
+	rt::println("  cat /hello           print a file");
+	rt::println("  write /tmp/a \"hi\\n\"  write one");
+	rt::println("  mkdir /tmp/d         make a directory");
+	rt::println("  cp, mv, rm           copy, move, take away");
+	rt::println("  grep, sort, wc       look inside files");
+	rt::println("  cc -o /tmp/x file.c  compile a C program");
+	rt::println("");
+	rt::println("Quotes keep words together: echo \"hi there\".");
+	rt::println("> sends output to a file, >> adds to one, and | hands it to");
+	rt::println("the next command, as in cat /tmp/a | wc -l.");
+	rt::println("The up and down arrows walk what has been run, the left and");
+	rt::println("right ones move along the line.");
+	rt::println("");
+	rt::println("  man <command>  what one command does");
+	rt::println("  tutorial       a walk through the system, a page at a time");
+	rt::println("  help all       every command there is");
+};
+
+// Every command there is, with the one line that says what it does.
+fn help_all() void = {
 	rt::println("bunix shell. The commands are:");
 	for (let i = 0z; i < len(MANUAL); i += 1) {
 		if (!MANUAL[i].builtin) {
@@ -1037,12 +1068,6 @@ fn run_help() void = {
 	};
 	rt::println("and the programs:");
 	help_extprog();
-	rt::println("The up and down arrows walk the history, and the left and");
-	rt::println("right arrows move along the line.");
-	rt::println("A > at the end of a line sends the output to a file, and a");
-	rt::println(">> adds to what is already in it. A | sends it to a file the");
-	rt::println("command after the | is given, as in cat /tmp/x | wc -l.");
-	rt::println("Type tutorial for a walk through the system.");
 };
 
 // How many chapters the tutorial has, besides the opening page.
