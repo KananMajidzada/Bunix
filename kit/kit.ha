@@ -37,26 +37,31 @@ def IH: size = 20;
 
 const MITEMS: [6]str = ["new", "resize", "move", "delete", "hide", "exit"];
 
-// Pointer: classic arrow cursor (tip at hotspot). 14x14 body stored as
-// art: '#' = black arrow, '.' = white halo. 196 cells total.
+// Pointer: a 14x14 arrow, stored as art. 0 leaves the pixel alone, 1 is the
+// white outline and 2 is the black it fills, so the shape carries its own
+// edge and nothing has to be drawn around it afterwards. The tip in the top
+// left corner is the hotspot: it lands on where the pointer really is.
+def PW: size = 14;
+def PH: size = 14;
+def CUR_EDGE: u8 = 1;	// the white line round the shape
+def CUR_FILL: u8 = 2;	// the black inside it
+
 const CUR: [196]u8 = [
-	0x23,0x23,0x23,0x23,0x23,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x23,0x23,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x23,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x23,0x23,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x23,0x23,0x2e,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x23,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,0x2e,
-	0x23,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,0x2e,0x2e,0x2e,
-	0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,0x2e,0x2e,
-	0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,0x2e,
-	0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,
-	0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,0x2e,
-	0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,0x23,
-	0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x2e,0x23,0x23,
+	1,1,1,1,1,1,1,1,1,0,0,0,0,0,
+	1,2,2,2,2,2,2,2,1,0,0,0,0,0,
+	1,2,2,2,2,2,2,2,1,0,0,0,0,0,
+	1,2,2,2,2,1,1,1,1,0,0,0,0,0,
+	1,2,2,2,2,2,1,1,0,0,0,0,0,0,
+	1,2,2,1,2,2,2,1,1,0,0,0,0,0,
+	1,2,2,1,1,2,2,2,1,1,0,0,0,0,
+	1,2,2,1,1,1,2,2,2,1,1,0,0,0,
+	1,1,1,1,0,1,1,2,2,2,1,1,0,0,
+	0,0,0,0,0,0,1,1,2,2,2,1,1,0,
+	0,0,0,0,0,0,0,1,1,2,2,2,1,1,
+	0,0,0,0,0,0,0,0,1,1,2,2,2,1,
+	0,0,0,0,0,0,0,0,0,1,1,2,1,1,
+	0,0,0,0,0,0,0,0,0,0,1,1,1,0,
 ];
-def BW: size = 18;
-def BH: size = 18;
 
 type win = struct {
 	used: bool,
@@ -288,51 +293,30 @@ fn draw_menu() void = {
 	};
 };
 
-fn ptr_ox() size = mx - 2;
-fn ptr_oy() size = my - 2;
+// Where the pointer is drawn. The art's own top left corner is the hotspot,
+// so it goes straight onto the pointer position with nothing added or taken
+// off, and the clamp keeps the whole 14x14 shape on the screen.
+fn ptr_ox() size = mx;
+fn ptr_oy() size = my;
 
-fn ptr_lo_x() int = 2;
-fn ptr_hi_x() int = (fb::width() - 2): int;
-fn ptr_lo_y() int = 2;
-fn ptr_hi_y() int = (fb::height() - 2): int;
+fn ptr_lo_x() int = 0;
+fn ptr_hi_x() int = (fb::width() - PW): int;
+fn ptr_lo_y() int = 0;
+fn ptr_hi_y() int = (fb::height() - PH): int;
 
-fn body(i: size, j: size) bool = {
-	if (i < 2 || j < 2 || i + 2 >= BW || j + 2 >= BH) {
-		return false;
-	};
-	return CUR[(j - 2) * 14 + (i - 2)] == 0x23;
-};
-
+// Paints the pointer from its art, one cell at a time. There is nothing to
+// work out around the shape: the white edge and the black fill are both in
+// the art already, so a cell that is 0 is simply left as it was.
 fn draw_pointer() void = {
 	const x = ptr_ox();
 	const y = ptr_oy();
-	for (let j = 0z; j < BH; j += 1) {
-		for (let i = 0z; i < BW; i += 1) {
-			if (body(i, j)) {
-				fb::set(x + i, y + j, fb::BLACK);
-			};
-		};
-	};
-	for (let j = 0z; j < BH; j += 1) {
-		for (let i = 0z; i < BW; i += 1) {
-			if (body(i, j)) {
-				continue;
-			};
-			let edge = false;
-			if (i > 0 && body(i - 1, j)) {
-				edge = true;
-			};
-			if (i + 1 < BW && body(i + 1, j)) {
-				edge = true;
-			};
-			if (j > 0 && body(i, j - 1)) {
-				edge = true;
-			};
-			if (j + 1 < BH && body(i, j + 1)) {
-				edge = true;
-			};
-			if (edge) {
+	for (let j = 0z; j < PH; j += 1) {
+		for (let i = 0z; i < PW; i += 1) {
+			const c = CUR[j * PW + i];
+			if (c == CUR_EDGE) {
 				fb::set(x + i, y + j, fb::WHITE);
+			} else if (c == CUR_FILL) {
+				fb::set(x + i, y + j, fb::BLACK);
 			};
 		};
 	};
