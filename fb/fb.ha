@@ -171,6 +171,95 @@ export fn text_big(x: size, y: size, s: str, sc: size, fg: u32, bg: u32) void = 
 	};
 };
 
+// The framebuffer as a file, in the Plan 9 spirit: a program that draws gets
+// at the display by writing /dev/fb, with no call of its own. The file is the
+// screen as a flat, tightly packed block of 32-bit pixels, width * height * 4
+// bytes, row after row with no padding. The hardware's own stride is an inner
+// detail and never crosses the boundary, so a program lays out a frame as it
+// pleases and does not have to know how the card happens to be addressed.
+//
+// A write lands in the shadow and then the rows it touched are copied onto the
+// card, so a frame is never shown half-painted and a program that updates one
+// band does not pay for the whole screen.
+
+// The size in bytes of the framebuffer file: one 32-bit pixel per pixel.
+export fn dev_size() u64 = {
+	if (addr == 0) {
+		return 0;
+	};
+	return (fbw * fbh * 4): u64;
+};
+
+// The screen the file describes, so a program can lay a frame out to fit.
+export fn dev_dims(w: *size, h: *size) void = {
+	*w = fbw;
+	*h = fbh;
+};
+
+// Copies a run of pixels the caller owns onto the screen. The pixels are
+// packed 32-bit, width w then height h, and sit at the byte offset off in the
+// file, which names a pixel position by off / 4. Whole rows are moved in one
+// pass; the ragged head and tail of a partial write go a pixel at a time.
+export fn dev_write(data: []u8, off: u64) size = {
+	const total = dev_size();
+	if (total == 0 || off >= total || len(data) == 0) {
+		return 0;
+	};
+	let n = (len(data): u64);
+	if (off + n > total) {
+		n = total - off;
+	};
+	// The pixel the write starts at, and the row and column it names.
+	let p = (off / 4): u64;
+	let src = 0z;
+	for (p < (fbw * fbh): u64 && (src: u64) < n) {
+		const y = p / (fbw: u64);
+		const x = p % (fbw: u64);
+		const dst = addr + (y * (pitch: u64) + x * 4): uintptr;
+		// How many bytes of this row are left to write.
+		let room = ((fbw: u64) - x) * 4;
+		if (room > n - (src: u64)) {
+			room = n - (src: u64);
+		};
+		// A whole run to the end of the row moves at once.
+		architecture::memcpy(dst, (&data[src]: uintptr), room: size);
+		src += room: size;
+		p += room / 4;
+	};
+	// The rows the write covered, copied onto the card in one pass.
+	const first = (off / 4) / (fbw: u64);
+	const last = (p - 1) / (fbw: u64);
+	present_rect(0, first: size, fbw, (last - first + 1): size);
+	return n: size;
+};
+
+// Copies pixels off the screen into the caller's buffer, packed the same way.
+export fn dev_read(buf: []u8, off: u64, n: size) size = {
+	const total = dev_size();
+	if (total == 0 || off >= total || n == 0) {
+		return 0;
+	};
+	let got = (n: u64);
+	if (off + got > total) {
+		got = total - off;
+	};
+	let p = (off / 4): u64;
+	let dst = 0z;
+	for (p < (fbw * fbh): u64 && (dst: u64) < got) {
+		const y = p / (fbw: u64);
+		const x = p % (fbw: u64);
+		const src = addr + (y * (pitch: u64) + x * 4): uintptr;
+		let room = ((fbw: u64) - x) * 4;
+		if (room > got - (dst: u64)) {
+			room = got - (dst: u64);
+		};
+		architecture::memcpy((&buf[dst]: uintptr), src, room: size);
+		dst += room: size;
+		p += room / 4;
+	};
+	return dst;
+};
+
 fn addr_of(x: int, y: int) uintptr = {
 	return addr + ((((y: size) * pitch) + ((x: size) * 4)): uintptr);
 };

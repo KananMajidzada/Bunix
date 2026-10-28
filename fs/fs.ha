@@ -1,6 +1,7 @@
 use architecture;
 use block;
 use console;
+use fb;
 use mem;
 use paging;
 use rt;
@@ -401,6 +402,31 @@ fn gen_uptime(buf: []u8) size = {
 	return n;
 };
 
+// Milliseconds since boot, as a program that paces a game loop reads. This is
+// the clock a drawing program asks for rather than counting its own frames, so
+// it runs at the same speed on a fast machine and a slow one.
+fn gen_millis(buf: []u8) size = {
+	let n = put_num(buf, architecture::millis());
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
+// The screen the framebuffer file describes, so a program that draws can lay
+// a frame out to fit it: width and height in pixels, as two numbers.
+fn gen_fbgeom(buf: []u8) size = {
+	let w: size = 0;
+	let h: size = 0;
+	fb::dev_dims(&w, &h);
+	let n = put_num(buf, w: u64);
+	buf[n] = ' ': u8;
+	n += 1;
+	n += put_num(buf[n..], h: u64);
+	buf[n] = '\n': u8;
+	n += 1;
+	return n;
+};
+
 fn gen_mem(buf: []u8) size = {
 	let n = put_str(buf, "frames free ");
 	n += put_num(buf[n..], mem::free_frames());
@@ -526,6 +552,33 @@ fn disk_wdev(data: []u8, off: u64) size = {
 		p = 0;
 	};
 	return wrote;
+};
+
+// /dev/kbd, the keyboard as a stream of key edges for a program that draws
+// rather than types. Each event is one 64-bit word: the scancode in the low
+// byte, KEY_UP when the key was released, KEY_EXT when it was an extended
+// scancode. A game holds several keys at once and has to see the moment one
+// is let go, which the character queue cannot tell it.
+//
+// The file is a queue rather than a sequence of bytes, so where the read
+// starts means nothing and the offset goes unheeded. Zero bytes come back
+// when no edge is waiting: a program polls this between frames rather than
+// blocking on it.
+fn kbd_read(buf: []u8, off: u64, n: size) size = {
+	_ = off;
+	let got = 0z;
+	for (got + 8 <= n) {
+		const e = console::keyev();
+		if (e == 0) {
+			break;
+		};
+		// The event as the little-endian word a C program expects.
+		for (let i = 0z; i < 8; i += 1) {
+			buf[got + i] = ((e >> ((i * 8): u64)) & 0xFF): u8;
+		};
+		got += 8;
+	};
+	return got;
 };
 
 // Byte-order helpers for the on-disk format. The superblock lives in sector 0:
@@ -815,6 +868,19 @@ export fn init() void = {
 	nodes[stage2].gdsk = &stage2_gen;
 	link(dev, stage2);
 
+	// The screen as a file: pixels packed 32-bit, tightly, width by height.
+	// Writing it draws; reading it takes back what is on the screen.
+	const fbdev = mknode("fb", false);
+	nodes[fbdev].gdsk = &fb::dev_read;
+	nodes[fbdev].wdsk = &fb::dev_write;
+	link(dev, fbdev);
+
+	// The keyboard as a file: key edges, make and break, for a program that
+	// holds several keys at once.
+	const kbd = mknode("kbd", false);
+	nodes[kbd].gdsk = &kbd_read;
+	link(dev, kbd);
+
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
 	link(proc, version);
@@ -822,6 +888,16 @@ export fn init() void = {
 	const uptime = mknode("uptime", false);
 	nodes[uptime].gen = &gen_uptime;
 	link(proc, uptime);
+
+	// The clock as a file, and the screen's size: what a program that draws
+	// rather than types needs to pace itself and lay a frame out.
+	const millisfile = mknode("millis", false);
+	nodes[millisfile].gen = &gen_millis;
+	link(proc, millisfile);
+
+	const fbgeom = mknode("fb", false);
+	nodes[fbgeom].gen = &gen_fbgeom;
+	link(proc, fbgeom);
 
 	const memfile = mknode("mem", false);
 	nodes[memfile].gen = &gen_mem;

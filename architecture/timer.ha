@@ -16,3 +16,11 @@ export fn timer_tick() void = {
 export fn ticks() u64 = tick;
 
 export fn seconds() u64 = tick / HZ;
+
+// Milliseconds since boot, for a program that paces itself: a game loop asks
+// for this rather than counting its own iterations, so it runs at the same
+// speed on a fast machine and a slow one. The timer ticks HZ times a second,
+// so this is whole multiples of (1000 / HZ).
+export fn millis() u64 = {
+	return tick * (1000 / (HZ: u64));
+};
