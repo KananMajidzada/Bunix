@@ -6,11 +6,16 @@ use user;
 
 export const BASE: u64 = 0x400000;
 // The window above the image: the heap grows up from the end of the program,
-// then the argument page, then the stack at the top. A compiler needs a good
-// deal of heap, so the region is the whole 4 MiB reserved for user space.
-export const STACK_TOP: u64 = 0x800000;
-export const ARG: u64 = 0x7E0000;
-export const HEAP_END: u64 = 0x7E0000;
+// then the argument page, then the stack at the top. A program that draws
+// keeps a whole screen of pixels and a game's working set besides, so the
+// window is the 32 MiB that paging lays out for every space: 0x400000 to
+// 0x2400000, with the argument page at 0x23E0000 a good way below the stack
+// so a deep recursion runs into the guard long before it reaches the
+// arguments.
+export const WINDOW: u64 = 0x2000000;
+export const STACK_TOP: u64 = 0x2400000;
+export const ARG: u64 = 0x23E0000;
+export const HEAP_END: u64 = 0x23E0000;
 
 def PAGE: u64 = 4096;
 // The stack has to hold whatever the program recurses with, and a compiler
@@ -32,7 +37,7 @@ fn slice_of(addr: uintptr, n: size) []u8 = {
 };
 
 export fn reserve() void = {
-	mem::reserve(BASE: uintptr, 0x400000);
+	mem::reserve(BASE: uintptr, WINDOW);
 };
 
 export fn run(arg: str) size = run_with(arg, false);

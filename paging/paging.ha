@@ -56,30 +56,33 @@ fn set(table: uintptr, i: u64, v: u64) void = {
 	*p = v;
 };
 
-// A fresh address space: the kernel identity-mapped supervisor-only, with a
-// private page table pair for the user window at 0x400000. The window is two
-// 2 MiB slots so a compiler has room for its heap, its stack and its argument
-// page without reaching past the window.
+// A fresh address space: the kernel identity-mapped supervisor-only, with
+// private page tables for the user window. The window is WINS slots of 2 MiB
+// each, beginning at slot WIN0 (4 MiB): a program needs room for its image,
+// a heap big enough to hold a screen of pixels and a game's working set
+// besides, an argument page, and a stack. The window's physical pages are
+// reserved out of the frame allocator when the kernel starts, so the
+// identity map the window shadows is never wanted for anything else.
+def WIN0: u64 = 2;
+def WINS: u64 = 16;
+
 export fn space_new() uintptr = {
 	const pml4 = mem::frames_alloc(1);
 	const pdpt = mem::frames_alloc(1);
 	const pd = mem::frames_alloc(1);
-	const pt = mem::frames_alloc(1);
-	const pt2 = mem::frames_alloc(1);
-	if (pml4 == 0 || pdpt == 0 || pd == 0 || pt == 0 || pt2 == 0) {
+	const pts = mem::frames_alloc(WINS);
+	if (pml4 == 0 || pdpt == 0 || pd == 0 || pts == 0) {
 		return 0;
 	};
 	zero(pml4, 4096);
 	zero(pdpt, 4096);
 	zero(pd, 4096);
-	zero(pt, 4096);
-	zero(pt2, 4096);
+	zero(pts, (WINS * 4096): size);
 
 	for (let i = 0u64; i < 512; i += 1) {
-		if (i == 2) {
-			set(pd, i, (pt: u64) | ENTRY_P | ENTRY_W | ENTRY_U);
-		} else if (i == 3) {
-			set(pd, i, (pt2: u64) | ENTRY_P | ENTRY_W | ENTRY_U);
+		if (i >= WIN0 && i < WIN0 + WINS) {
+			set(pd, i, (pts + (((i - WIN0) * 4096): uintptr)): u64
+				| ENTRY_P | ENTRY_W | ENTRY_U);
 		} else {
 			set(pd, i, (i * 0x200000) | ENTRY_P | ENTRY_W | ENTRY_PS);
 		};
@@ -126,8 +129,8 @@ export fn space_free(space: uintptr) void = {
 	const pml4 = space;
 	const pdpt = (get(pml4, 0) & ~0xFFF): uintptr;
 	const pd = (get(pdpt, 0) & ~0xFFF): uintptr;
-	// Both halves of the window.
-	for (let slot = 2u64; slot <= 3; slot += 1) {
+	// Every slot of the window, and every frame mapped through it.
+	for (let slot = WIN0; slot < WIN0 + WINS; slot += 1) {
 		const pt = (get(pd, slot) & ~0xFFF): uintptr;
 		if (pt == 0) {
 			continue;
