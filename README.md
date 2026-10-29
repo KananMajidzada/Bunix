@@ -31,7 +31,7 @@ Some of what the shell knows:
 ## The shell
 
 The shell `ush` is the one you land in. It keeps a working directory, a
-history and a few aliases, and the arrow keys walk the history.
+history and a few aliases, and the arrow keys walk the history (As usual) .
 
 	ush> cd /usr/include
 	ush> ls stdio.h
