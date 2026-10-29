@@ -197,9 +197,9 @@ The disk is a file, so a copy of it is a copy of everything on it.
 
 ## Fun
 
-Right now Bunix have mascot calling "Bunora the Hare". 
+Right now Bunix have mascot calling "BunBun the Hare". 
 
 ## Lisencing 
 
-GPL lisence
+GPL 3 lisence
 
