@@ -306,15 +306,20 @@ static int emit(sink_t *s, const char *fmt, va_list ap) {
             char body[24];
             int blen = utoa(mag, 10, 0, body);
             if (prec >= 0 && prec > blen) {
-                // With a precision the zero flag is dropped, as in C.
+                // A precision is a minimum number of digits: the value is
+                // padded with zeros - "%.3d" of 33 is "033" - and the sign
+                // comes before the zeros. The zero flag is dropped, as in C.
                 zero = 0;
-                int pad = prec - blen + (neg || plus || space ? 1 : 0);
-                if (!left) sink_repeat(s, ' ', pad);
+                int sign = neg || plus || space;
+                int pad = prec - blen;
+                int total = sign + pad + blen;
+                if (!left && width > total) sink_repeat(s, ' ', width - total);
                 if (neg) sink_put(s, '-');
                 else if (plus) sink_put(s, '+');
                 else if (space) sink_put(s, ' ');
+                if (pad) sink_repeat(s, '0', pad);
                 sink_str(s, body, blen);
-                if (left) sink_repeat(s, ' ', width - (pad + blen));
+                if (left && width > total) sink_repeat(s, ' ', width - total);
             } else {
                 emit_num(s, mag, 10, 0, neg, width, zero, left, plus, space);
             }
@@ -333,11 +338,21 @@ static int emit(sink_t *s, const char *fmt, va_list ap) {
             char body[24];
             int blen = utoa(v, (int)base, *p == 'X', body);
             if (prec >= 0 && prec > blen) {
+                // Zeros up to the precision, the "0x" of an alternate
+                // hexadecimal in front of them, and the width outside -
+                // the same shape as the signed case, with no sign to it.
                 zero = 0;
+                int pre = (alt && base == 16 && v) ? 2 : 0;
                 int pad = prec - blen;
-                if (!left) sink_repeat(s, '0', pad);
+                int total = pre + pad + blen;
+                if (!left && width > total) sink_repeat(s, ' ', width - total);
+                if (pre) {
+                    sink_put(s, '0');
+                    sink_put(s, *p == 'X' ? 'X' : 'x');
+                }
+                if (pad) sink_repeat(s, '0', pad);
                 sink_str(s, body, blen);
-                if (left) sink_repeat(s, ' ', width - (pad + blen));
+                if (left && width > total) sink_repeat(s, ' ', width - total);
             } else {
                 if (alt && base == 16 && v) sink_put(s, *p == 'X' ? '0' : '0');
                 emit_num(s, v, (int)base, *p == 'X', 0, width, zero, left, 0, 0);
@@ -546,22 +561,25 @@ char *fgets(char *s, int n, FILE *f) {
 FILE *fopen(const char *path, const char *mode) {
     int oflags;
     int ff = 0;
+    int plus = 0;
 
-    if (mode[0] == 'r' && !mode[1]) {
-        oflags = O_RDONLY;
-        ff = F_READ;
+    // The mode is its first letter, plus anything the standard lets a
+    // program tack on after it: "b" for binary (every file is bytes here,
+    // so it is ignored), "t" for text, and "+" to open for reading and
+    // writing both. A game opens its data file "rb".
+    for (const char *m = mode + 1; *m; ++m) {
+        if (*m == '+') plus = 1;
+    }
+
+    if (mode[0] == 'r') {
+        oflags = plus ? O_RDWR : O_RDONLY;
+        ff = plus ? (F_READ | F_WRITE) : F_READ;
     } else if (mode[0] == 'w') {
-        oflags = O_WRONLY | O_CREAT | O_TRUNC;
-        ff = F_WRITE;
+        oflags = (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_TRUNC;
+        ff = plus ? (F_READ | F_WRITE) : F_WRITE;
     } else if (mode[0] == 'a') {
-        oflags = O_WRONLY | O_CREAT | O_APPEND;
-        ff = F_WRITE;
-    } else if (mode[0] == 'r' && mode[1] == '+') {
-        oflags = O_RDWR;
-        ff = F_READ | F_WRITE;
-    } else if (mode[0] == 'w' && mode[1] == '+') {
-        oflags = O_RDWR | O_CREAT | O_TRUNC;
-        ff = F_READ | F_WRITE;
+        oflags = (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_APPEND;
+        ff = plus ? (F_READ | F_WRITE) : F_WRITE;
     } else {
         return NULL;
     }

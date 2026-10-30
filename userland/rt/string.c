@@ -202,3 +202,28 @@ char *strndup(const char *s, size_t n) {
     p[len] = 0;
     return p;
 }
+
+// Comparing names without caring about case: how a game finds its data file
+// whatever the disk happens to call it. Ordering is by lowercased character,
+// which is all either spelling of the call asks for.
+static int lower(int c) {
+    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+}
+
+int strcasecmp(const char *a, const char *b) {
+    while (*a && lower((unsigned char)*a) == lower((unsigned char)*b)) {
+        a++;
+        b++;
+    }
+    return lower((unsigned char)*a) - lower((unsigned char)*b);
+}
+
+int strncasecmp(const char *a, const char *b, size_t n) {
+    while (n && *a && lower((unsigned char)*a) == lower((unsigned char)*b)) {
+        a++;
+        b++;
+        n--;
+    }
+    if (n == 0) return 0;
+    return lower((unsigned char)*a) - lower((unsigned char)*b);
+}

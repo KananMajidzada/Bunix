@@ -69,6 +69,7 @@ int ferror(FILE *f);
 void perror(const char *s);
 
 int remove(const char *path);
+int rename(const char *from, const char *to);
 int sscanf(const char *s, const char *fmt, ...);
 int vsscanf(const char *s, const char *fmt, va_list ap);
 int fscanf(FILE *f, const char *fmt, ...);

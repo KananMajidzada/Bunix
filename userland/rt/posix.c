@@ -282,6 +282,19 @@ int unlink(const char *path) {
 // POSIX puts both spellings in circulation.
 int remove(const char *path) { return unlink(path); }
 
+// A rename is a copy and a removal, which is all a filesystem of files can
+// make of it. DOOM writes a savegame to a temporary name and renames it over
+// the real one, so that a crash mid-write cannot leave a half-saved game.
+int rename(const char *from, const char *to) {
+    size_t len = 0, cap = 0;
+    uint8_t *buf = slurp(from, 0, &len, &cap);
+    if (!buf) return -1;
+    int ok = bunix_writefile(to, buf, len) == (ssize_t)len;
+    free(buf);
+    if (!ok) return -1;
+    return unlink(from);
+}
+
 int mkdir(const char *path, int mode) {
     return bunix_create(path, 1) ? 0 : -1;
 }

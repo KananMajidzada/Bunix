@@ -367,3 +367,7 @@ double strtod(const char *s, char **end) {
 long double strtold(const char *s, char **end) { return (long double)strtod(s, end); }
 
 float strtof(const char *s, char **end) { return (float)strtod(s, end); }
+
+// The spelling of strtod for a caller that does not care where the number
+// ended. A game reads its configuration file through this.
+double atof(const char *s) { return strtod(s, NULL); }
