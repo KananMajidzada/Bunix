@@ -9,7 +9,7 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c fbtest tcc mei \
+PROGS = hello wc grep cp cc test_c fbtest tcc mei doom \
 	ls sort uniq head tail tr rev seq expr basename dirname \
 	stat du df test find tree \
 	mv nl cut paste comm diff od strings cksum file uname id split \
@@ -28,7 +28,7 @@ all: bunix.bin
 # The kernel is a freestanding Hare program. HAREPATH is pointed at the tree
 # itself so the build only sees our runtime and modules.
 bunix: user/blob.ha user/progs.ha user/progs.s user/hdrs.ha user/src.ha \
-       user/crt.ha user/libc.ha user/bootsec.ha $(SRCS)
+       user/crt.ha user/libc.ha user/bootsec.ha user/wad.ha user/wad.s $(SRCS)
 	HAREPATH=. $(HARE) build -F -a$(ARCH) -o $@
 
 # QEMU's built-in Multiboot loader only accepts 32-bit ELF, so hand it a flat
@@ -199,6 +199,74 @@ build/elf_tcc: $(TCC_SRCS) $(C_RT_DIR)/libc.a tools/bcc/bcc
 build/prog_tcc.bin: build/elf_tcc
 	$(OBJCOPY) -O binary $< $@
 
+# DOOM, through the device files. The sources are doomgeneric, in the object
+# list upstream itself builds - the game proper plus its stub sound and file
+# backends, with the SDL, Allegro and X11 layers left out because a Bunix
+# program talks to the machine through files instead. The one file of our own
+# is tools/doom/doomgeneric_bunix.c, the five-function port on top of /dev/fb,
+# /dev/kbd and /proc/millis. It is a program of many translation units, so it
+# is compiled here rather than through bcc's single-file rule.
+DOOM_DIR = tools/doom/doomgeneric
+DOOM_OBJS = $(addsuffix .o,$(addprefix build/doom/, \
+	dummy am_map doomdef doomstat dstrings d_event d_items d_iwad d_loop \
+	d_main d_mode d_net f_finale f_wipe g_game hu_lib hu_stuff info \
+	i_cdmus i_endoom i_joystick i_scale i_sound i_system i_timer memio \
+	m_argv m_bbox m_cheat m_config m_controls m_fixed m_menu m_misc \
+	m_random p_ceilng p_doors p_enemy p_floor p_inter p_lights p_map \
+	p_maputl p_mobj p_plats p_pspr p_saveg p_setup p_sight p_spec \
+	p_switch p_telept p_tick p_user r_bsp r_data r_draw r_main r_plane \
+	r_segs r_sky r_things sha1 sounds statdump st_lib st_stuff s_sound \
+	tables v_video wi_stuff w_checksum w_file w_main w_wad z_zone \
+	w_file_stdc i_input i_video doomgeneric doomgeneric_bunix))
+DOOM_HDRS = $(wildcard $(DOOM_DIR)/*.h)
+# The game is old C written for other compilers: strict aliasing and the
+# warnings its style would raise are turned off, everything else about the
+# runtime's freestanding setup is kept.
+DOOM_CFLAGS = -I$(C_RT_DIR) -I$(DOOM_DIR) \
+	-ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
+	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2 \
+	-fno-strict-aliasing \
+	-Wno-unused-variable -Wno-unused-but-set-variable \
+	-Wno-pointer-sign -Wno-parentheses -Wno-unknown-pragmas \
+	-Wno-comment -Wno-format-security -Wno-implicit-fallthrough
+
+build/doom/%.o: $(DOOM_DIR)/%.c $(DOOM_HDRS) $(C_RT_HDRS)
+	@mkdir -p build/doom
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+
+build/doom/%.o: tools/doom/%.c $(DOOM_HDRS) $(C_RT_HDRS)
+	@mkdir -p build/doom
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+
+build/elf_doom: $(DOOM_OBJS) $(C_RT_DIR)/libc.a
+	$(CC) -nostdlib -static -no-pie -T $(C_RT_DIR)/c.ld -o $@ \
+		$(DOOM_OBJS) $(C_RT_DIR)/libc.a
+
+build/prog_doom.bin: build/elf_doom
+	$(OBJCOPY) -O binary $< $@
+
+# The shareware data file, folded into the kernel and served as /doom1.wad.
+# It is nearly four million bytes, far too many for a Hare byte table, so it
+# rides an .incbin like the program images do, with a small module holding a
+# slice across it.
+build/doom1.wad:
+	@mkdir -p build
+	curl -fsSL -o $@ \
+		https://github.com/Akbar30Bill/DOOM_wads/raw/master/doom1.wad
+
+user/wad.ha: build/doom1.wad
+	@{ printf '// Generated from build/doom1.wad. Do not edit.\n\n'; \
+	   printf 'type wadhdr = struct {\n\tdata: uintptr,\n\tlength: size,\n\tcapacity: size,\n};\n\n'; \
+	   printf '@symbol("user.wadbytes") const wadbytes: u8;\n\n'; \
+	   printf 'export fn wad() []u8 = {\n'; \
+	   printf '\tconst h = wadhdr {\n\t\tdata = &wadbytes: uintptr,\n'; \
+	   printf '\t\tlength = %s,\n\t\tcapacity = %s,\n\t};\n' \
+	     "$$(wc -c < build/doom1.wad)" "$$(wc -c < build/doom1.wad)"; \
+	   printf '\treturn *(&h: *[]u8);\n};\n'; } > $@
+
+user/wad.s:
+	@{ printf '.section .rodata\n.global user.wadbytes\nuser.wadbytes:\n.incbin "build/doom1.wad"\n'; } > $@
+
 # Fold the program images into the kernel: their bytes end to end in one blob,
 # with a table naming each one's offset and size.
 build/progs.bin: $(PROG_BINS)
@@ -229,6 +297,6 @@ run-nographic: bunix.bin
 
 clean:
 	rm -rf bunix bunix.bin build user/blob.ha user/progs.ha user/progs.s \
-	user/bootsec.ha
+	user/bootsec.ha user/wad.ha user/wad.s
 
 .PHONY: all run run-nographic clean
