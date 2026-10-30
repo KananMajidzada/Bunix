@@ -110,6 +110,10 @@ fn cleanup(id: size) void = {
 	};
 	threads[id].cleaned = true;
 	free_user(id);
+	// A drawing window made for this thread has nothing left to draw into it,
+	// so it goes the way the thread does.
+	kit::release_owner(id);
+	gfxof[id] = false;
 	reap(threads[id].id: size);
 };
 
@@ -186,6 +190,25 @@ let win_fg: [MAXWIN]size = [MAXWIN...];
 // own first process is a monitor that never reads the keyboard, and it is the
 // first live thread in the window the boot shell runs in.
 let win_shell: [MAXWIN]size = [MAXWIN...];
+
+// The threads that draw into a window of their own. Once such a thread has
+// asked for a drawing window its writes to /dev/fb never fall back to the
+// screen: if the window is gone the writes land nowhere, rather than a
+// program that lost its window taking the display over behind the desktop's
+// back.
+let gfxof: [MAXTHREADS]bool = [false...];
+
+// Remembers that a thread now draws into a window of its own.
+export fn set_gfx(id: size, v: bool) void = {
+	if (id < MAXTHREADS) {
+		gfxof[id] = v;
+	};
+};
+
+// Whether a thread is one that draws into a window rather than at the screen.
+export fn is_gfx(id: size) bool = {
+	return id < MAXTHREADS && gfxof[id];
+};
 
 // The window the next thread started belongs to. MAXWIN means "the window of
 // whoever is starting it", which is right for a program a shell runs.

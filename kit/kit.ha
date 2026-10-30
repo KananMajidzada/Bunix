@@ -1,4 +1,6 @@
+use architecture;
 use fb;
+use mem;
 use rt;
 
 // kit: the window manager the machine boots into. A plain desktop holds
@@ -34,6 +36,14 @@ def MENUSEL: u32 = 0x3B3B3B;
 
 def MI: size = 6;
 def IH: size = 20;
+// The square on a drawing window's title bar that fills the screen with it,
+// or puts it back where it was.
+def GBTN: size = 14;
+// The size a drawing window starts at: the game's own picture, one pixel of
+// it to one pixel of the window, with nothing scaled until the player asks
+// for more window than that.
+def GDEFW: size = 640;
+def GDEFH: size = 400;
 
 const MITEMS: [6]str = ["new", "resize", "move", "delete", "hide", "exit"];
 
@@ -69,6 +79,18 @@ type win = struct {
 	wx: size, wy: size, ww: size, wh: size,
 	cols: size, rows: size,
 	total: size, top: size, crow: size, ccol: size,
+	// A drawing window holds pixels rather than text: a program writes its
+	// frame straight into the window, and kit keeps the last one so the
+	// window can be put back when something else has been drawn over it.
+	graphic: bool,
+	gbuf: uintptr,		// the picture, gw by gh 32-bit pixels
+	gpages: size,		// the frames gbuf was taken from
+	gw: size, gh: size,	// the picture's size, which is the program's screen
+	full: bool,			// grown over the whole display
+	fsavx: size, fsavy: size, fsvw: size, fsvh: size,	// where it was before
+	gname: [16]u8, gnlen: size,	// what the title bar calls it
+	owner: size,		// the thread the window was made for
+	gterm: size,		// the terminal that thread's own words still go to
 };
 
 let on = false;
@@ -82,6 +104,12 @@ let mx = 0z;
 let my = 0z;
 let lastbtn: u8 = 0;
 let hover: size = NONE;
+
+// The buttons a drawing program has down, taken while the pointer was over
+// its picture. They stay the program's until they come up again, so a press
+// made there is always answered with its release, wherever the pointer has
+// wandered to by then.
+let appbtn: u8 = 0;
 
 let grab: u8 = 0;	// 1 move, 2 resize, held with button 1
 let gwin: size = NONE;
@@ -124,12 +152,50 @@ export fn set_out_win(wi: size) void = {
 	out_win = wi;
 };
 
-// The window a byte written now should land in.
+// The window a byte written now should land in. A drawing window has no room
+// for words, so a program drawing into one still has its own output go to the
+// terminal it started in; when that terminal is gone the words are dropped
+// rather than left lying about the picture.
 export fn out_target() size = {
-	if (out_win != NONE && out_win < MAXWIN && wins[out_win].used) {
+	let wi = if (out_win != NONE && out_win < MAXWIN && wins[out_win].used) {
+		yield out_win;
+	} else {
+		yield focus;
+	};
+	if (wi != NONE && wi < MAXWIN && wins[wi].used && wins[wi].graphic) {
+		const t = wins[wi].gterm;
+		return if (t != NONE && t < MAXWIN && wins[t].used && !wins[t].graphic) {
+			yield t;
+		} else {
+			yield NONE;
+		};
+	};
+	return wi;
+};
+
+// The drawing window of whichever thread the kernel is running now, which is
+// where its writes to /dev/fb land. NONE for a program that draws at the
+// screen itself, such as a test that fills the display with a pattern.
+export fn gfx_window() size = {
+	if (on && out_win != NONE && out_win < MAXWIN && wins[out_win].used
+			&& wins[out_win].graphic) {
 		return out_win;
 	};
-	return focus;
+	return NONE;
+};
+
+// The size of the picture the running thread draws into, in pixels, and zero
+// by zero for a thread that draws at the screen itself - which is how a
+// program is told it has no window of its own.
+export fn gfx_dims(w: *size, h: *size) void = {
+	const wi = gfx_window();
+	if (wi == NONE) {
+		*w = 0;
+		*h = 0;
+		return;
+	};
+	*w = wins[wi].gw;
+	*h = wins[wi].gh;
 };
 
 // Set to the window whose contents changed. Terminal output only ever affects
@@ -185,6 +251,413 @@ fn clampv(v: int, lo: int, hi: int) int = {
 	};
 	return v;
 };
+
+// A rectangle of the screen, so the pieces of it a draw touches can be named.
+type rect = struct {
+	x: size, y: size, w: size, h: size,
+};
+
+// The rectangle a window draws into. A hidden window is only a title bar, and
+// that is all the screen ever sees of it.
+fn drawn(wi: size) rect = {
+	if (wins[wi].hidden) {
+		return rect { x = wins[wi].wx, y = wins[wi].wy, w = wins[wi].ww, h = TITLE };
+	};
+	return rect { x = wins[wi].wx, y = wins[wi].wy, w = wins[wi].ww, h = wins[wi].wh };
+};
+
+// ---------------------------------------------------------------------------
+// Drawing windows.
+//
+// A drawing window belongs to a program that asked for one by writing its
+// name to /dev/win: it is a rectangle of pixels rather than a grid of text,
+// sized to whatever the program reports it draws, and the program paints it
+// by writing /dev/fb. Kit keeps the last frame the program wrote so the
+// window can be repainted whenever something is drawn over or moved across
+// it, which is what lets a game and the desktop share the screen without
+// either leaving marks on the other.
+
+// The window's title, as the title bar draws it. A text window is a terminal;
+// a drawing window is called whatever its program named it.
+let titlebuf: [16]u8 = [0...];
+
+fn title_of(wi: size) str = {
+	if (!wins[wi].graphic) {
+		return "term";
+	};
+	const n = wins[wi].gnlen;
+	for (let i = 0z; i < n; i += 1) {
+		titlebuf[i] = wins[wi].gname[i];
+	};
+	return *(&titlebuf[..n]: *str);
+};
+
+fn set_name(wi: size, name: []u8) void = {
+	let n = len(name);
+	if (n > 15) {
+		n = 15;
+	};
+	if (n == 0) {
+		wins[wi].gname[0] = 'a': u8;
+		wins[wi].gname[1] = 'p': u8;
+		wins[wi].gname[2] = 'p': u8;
+		wins[wi].gnlen = 3;
+		return;
+	};
+	for (let i = 0z; i < n; i += 1) {
+		wins[wi].gname[i] = name[i];
+	};
+	wins[wi].gnlen = n;
+};
+
+// The frame that goes around a picture of the given size.
+fn glayout(wi: size) void = {
+	wins[wi].ww = wins[wi].gw + 2 * BORD;
+	wins[wi].wh = TITLE + 2 * BORD + wins[wi].gh;
+};
+
+// Hands back the frames a picture was held in.
+fn gfree(wi: size) void = {
+	const p = wins[wi].gbuf;
+	const n = wins[wi].gpages;
+	for (let i = 0z; i < n; i += 1) {
+		mem::release(p + ((i * 4096): uintptr));
+	};
+	wins[wi].gbuf = 0;
+	wins[wi].gpages = 0;
+	wins[wi].gw = 0;
+	wins[wi].gh = 0;
+};
+
+// Makes a picture of w by h pixels for the window, carrying over whatever of
+// the old one still fits. False when there is no room, and then nothing about
+// the window has changed.
+fn galloc(wi: size, w: size, h: size) bool = {
+	if (w < 16 || h < 16) {
+		return false;
+	};
+	const pages = (w * h * 4 + 4095) / 4096;
+	const p = mem::frames_alloc(pages: u64);
+	if (p == 0) {
+		return false;
+	};
+	// Cleared a word at a time: whatever the old picture does not cover must
+	// never show some other program's pixels.
+	for (let i = 0z; i < pages * 4096 / 8; i += 1) {
+		*((p + ((i * 8): uintptr)): *u64) = 0;
+	};
+	const old = wins[wi].gbuf;
+	if (old != 0) {
+		const ow = wins[wi].gw;
+		const oh = wins[wi].gh;
+		const cw = if (w < ow) w else ow;
+		const ch = if (h < oh) h else oh;
+		for (let j = 0z; j < ch; j += 1) {
+			for (let i = 0z; i < cw; i += 1) {
+				*((p + ((((j * w) + i) * 4): uintptr)): *u32) =
+					*((old + ((((j * ow) + i) * 4): uintptr)): *u32);
+			};
+		};
+		gfree(wi);
+	};
+	wins[wi].gbuf = p;
+	wins[wi].gpages = pages;
+	wins[wi].gw = w;
+	wins[wi].gh = h;
+	return true;
+};
+
+// Whether the pointer is on a window's picture rather than its frame, title,
+// or scrollbar. That is where a drawing program's mouse belongs; everything
+// around the picture stays the desktop's.
+fn over_content(wi: size, x: size, y: size) bool = {
+	return x >= wins[wi].wx + BORD
+		&& x < wins[wi].wx + BORD + wins[wi].gw
+		&& y >= wins[wi].wy + TITLE + BORD
+		&& y < wins[wi].wy + TITLE + BORD + wins[wi].gh;
+};
+
+// The square on the title bar that fills the screen with a drawing window or
+// puts it back, and whether the pointer is on it.
+fn btn_x(wi: size) size = wins[wi].wx + wins[wi].ww - GBTN - 6;
+fn btn_y(wi: size) size = wins[wi].wy + (TITLE - GBTN) / 2;
+
+fn over_btn(wi: size, x: size, y: size) bool = {
+	return x >= btn_x(wi) && x < btn_x(wi) + GBTN
+		&& y >= btn_y(wi) && y < btn_y(wi) + GBTN;
+};
+
+fn draw_btn(wi: size) void = {
+	const x = btn_x(wi);
+	const y = btn_y(wi);
+	const hot = mx >= x && mx < x + GBTN && my >= y && my < y + GBTN;
+	const bg = if (hot) FRAME else TITLEBG;
+	const fg = if (wi == focus) fb::WHITE else TITLEIDLE;
+	fb::fill(x, y, GBTN, GBTN, bg);
+	if (wins[wi].full) {
+		// A square inside a square: back to a window again.
+		outline(x + 3, y + 3, GBTN - 6, GBTN - 6, fg);
+	} else {
+		// A solid square: grow over the whole screen.
+		outline(x, y, GBTN, GBTN, fg);
+		fb::fill(x + 3, y + 3, GBTN - 6, GBTN - 6, fg);
+	};
+};
+
+// Grows the window over the whole display, or puts it back where it was. The
+// picture is made to fit either way and keeps what still fits of itself, and
+// the program finds out by asking /dev/win for its size again.
+fn set_full(wi: size, on2: bool) void = {
+	if (wi == NONE || !wins[wi].used || !wins[wi].graphic
+			|| wins[wi].full == on2) {
+		return;
+	};
+	if (on2) {
+		const w = fb::width() - 2 * BORD;
+		const h = fb::height() - TITLE - 2 * BORD;
+		if (!galloc(wi, w, h)) {
+			return;
+		};
+		wins[wi].fsavx = wins[wi].wx;
+		wins[wi].fsavy = wins[wi].wy;
+		wins[wi].fsvw = wins[wi].ww;
+		wins[wi].fsvh = wins[wi].wh;
+		wins[wi].wx = 0;
+		wins[wi].wy = 0;
+		wins[wi].ww = fb::width();
+		wins[wi].wh = fb::height();
+	} else {
+		const w = wins[wi].fsvw - 2 * BORD;
+		const h = wins[wi].fsvh - TITLE - 2 * BORD;
+		if (!galloc(wi, w, h)) {
+			return;
+		};
+		wins[wi].wx = wins[wi].fsavx;
+		wins[wi].wy = wins[wi].fsavy;
+		wins[wi].ww = wins[wi].fsvw;
+		wins[wi].wh = wins[wi].fsvh;
+	};
+	wins[wi].full = on2;
+	raise(wi);
+	focus = wi;
+	repaint();
+};
+
+// The fullscreen a program asked for through /dev/win: '1' fills the screen,
+// '0' puts the window back, anything else switches between the two.
+export fn control_full(wi: size, c: u8) void = {
+	if (wi == NONE || !wins[wi].used || !wins[wi].graphic) {
+		return;
+	};
+	if (c == ('1': u8)) {
+		set_full(wi, true);
+	} else if (c == ('0': u8)) {
+		set_full(wi, false);
+	} else {
+		set_full(wi, !wins[wi].full);
+	};
+};
+
+// Shows the picture now in the window: the pixels go into the shadow, then
+// whatever the desktop drew over them afterwards is put back on top of them,
+// and only the rectangles that really changed reach the card. The program
+// writes a frame sixty times a second, and none of that may spill onto a
+// terminal sitting over the window.
+fn show(wi: size) void = {
+	if (wins[wi].hidden || wins[wi].gbuf == 0) {
+		return;
+	};
+	const cx = wins[wi].wx + BORD;
+	const cy = wins[wi].wy + TITLE + BORD;
+	const cw = wins[wi].gw;
+	const ch = wins[wi].gh;
+	fb::blit(cx, cy, cw, ch, wins[wi].gbuf, cw * 4);
+	fb::present_rect(cx, cy, cw, ch);
+	// Windows raised above this one were drawn over the picture in z order,
+	// so they go back in the same order and still come out on top.
+	let zi = 0z;
+	let found = false;
+	for (let i = 0z; i < nz; i += 1) {
+		if (zlist[i] == wi) {
+			zi = i;
+			found = true;
+			break;
+		};
+	};
+	if (found) {
+		for (let j = zi + 1; j < nz; j += 1) {
+			const wj = zlist[j];
+			const r = drawn(wj);
+			if (r.x >= cx + cw || r.x + r.w <= cx
+					|| r.y >= cy + ch || r.y + r.h <= cy) {
+				continue;
+			};
+			draw_window(wj);
+			fb::present_rect(r.x, r.y, r.w, r.h);
+		};
+	};
+	// The menu and the pointer are above everything, and were possibly under
+	// the frame just shown.
+	if (menu_open) {
+		draw_menu();
+		fb::present_rect(menu_x, menu_y, menu_w(), menu_h());
+	};
+	draw_pointer();
+	fb::present_rect(mx, my, PW, PH);
+};
+
+// Puts a frame the program wrote into its window. The pixels are packed
+// 32-bit, w by h with no padding, and off names a byte of that picture: the
+// same shape /dev/fb has, only the picture is the window's own.
+export fn draw_frame(wi: size, data: []u8, off: u64) size = {
+	if (!on || wi == NONE || !wins[wi].used || !wins[wi].graphic) {
+		return 0;
+	};
+	const gw = (wins[wi].gw: u64);
+	const gh = (wins[wi].gh: u64);
+	const total = gw * gh * 4;
+	if (off >= total || len(data) == 0 || wins[wi].gbuf == 0) {
+		return 0;
+	};
+	let n = (len(data): u64);
+	if (off + n > total) {
+		n = total - off;
+	};
+	const base = wins[wi].gbuf;
+	let p = off / 4;
+	let src = 0z;
+	for (p < gw * gh && (src: u64) < n) {
+		const y = p / gw;
+		const x = p % gw;
+		const dst = base + ((y * gw + x) * 4): uintptr;
+		let room = (gw - x) * 4;
+		if (room > n - (src: u64)) {
+			room = n - (src: u64);
+		};
+		architecture::memcpy(dst, (&data[src]: uintptr), room: size);
+		src += room: size;
+		p += room / 4;
+	};
+	show(wi);
+	return n: size;
+};
+
+// Takes the picture back out of a window, packed the same way, which is how a
+// program saves what it drew and puts it back later.
+export fn read_frame(wi: size, buf: []u8, off: u64, n: size) size = {
+	if (!on || wi == NONE || !wins[wi].used || !wins[wi].graphic
+			|| wins[wi].gbuf == 0) {
+		return 0;
+	};
+	const gw = (wins[wi].gw: u64);
+	const gh = (wins[wi].gh: u64);
+	const total = gw * gh * 4;
+	if (off >= total || n == 0) {
+		return 0;
+	};
+	let got = (n: u64);
+	if (off + got > total) {
+		got = total - off;
+	};
+	const base = wins[wi].gbuf;
+	let p = off / 4;
+	let dst = 0z;
+	for (p < gw * gh && (dst: u64) < got) {
+		const y = p / gw;
+		const x = p % gw;
+		const src = base + ((y * gw + x) * 4): uintptr;
+		let room = (gw - x) * 4;
+		if (room > got - (dst: u64)) {
+			room = got - (dst: u64);
+		};
+		architecture::memcpy((&buf[dst]: uintptr), src, room: size);
+		dst += room: size;
+		p += room / 4;
+	};
+	return dst;
+};
+
+// Makes a drawing window for a program that asked for one by writing its name
+// to /dev/win, and hands it over: the window is focused at once, so keys and
+// pointer belong to the program, while the program's own words keep going to
+// the terminal it started in. NONE when there is no screen or no room.
+export fn claim_gfx(name: []u8, id: size, from: size) size = {
+	if (!on) {
+		return NONE;
+	};
+	// Asking twice gives the same window; only the name changes.
+	const have = gfx_window();
+	if (have != NONE) {
+		set_name(have, name);
+		return have;
+	};
+	let wi = NONE;
+	for (let i = 0z; i < MAXWIN; i += 1) {
+		if (!wins[i].used) {
+			wi = i;
+			break;
+		};
+	};
+	if (wi == NONE) {
+		return NONE;
+	};
+	wins[wi].used = true;
+	wins[wi].hidden = false;
+	wins[wi].cols = 0;
+	wins[wi].rows = 0;
+	wins[wi].total = 1;
+	wins[wi].top = 0;
+	wins[wi].crow = 0;
+	wins[wi].ccol = 0;
+	wins[wi].graphic = true;
+	wins[wi].gbuf = 0;
+	wins[wi].gpages = 0;
+	wins[wi].gw = 0;
+	wins[wi].gh = 0;
+	wins[wi].full = false;
+	wins[wi].fsavx = 0;
+	wins[wi].fsavy = 0;
+	wins[wi].fsvw = 0;
+	wins[wi].fsvh = 0;
+	wins[wi].owner = id;
+	wins[wi].gterm = if (from == wi) NONE else from;
+	set_name(wi, name);
+	if (!galloc(wi, GDEFW, GDEFH)) {
+		wins[wi].used = false;
+		return NONE;
+	};
+	glayout(wi);
+	// Over the middle of the screen, where the picture is easy to look at.
+	wins[wi].wx = (fb::width() - wins[wi].ww) / 2;
+	wins[wi].wy = (fb::height() - wins[wi].wh) / 2;
+	zlist[nz] = wi;
+	nz += 1;
+	focus = wi;
+	appbtn = 0;
+	repaint();
+	return wi;
+};
+
+// The thread a drawing window was made for has stopped, so the window has
+// nothing left to draw in it and goes: quitting a game leaves the desktop
+// exactly as it was found.
+export fn release_owner(id: size) void = {
+	if (!on) {
+		return;
+	};
+	let gone = false;
+	for (let i = 0z; i < MAXWIN; i += 1) {
+		if (wins[i].used && wins[i].graphic && wins[i].owner == id) {
+			delete_window(i);
+			gone = true;
+		};
+	};
+	if (gone) {
+		appbtn = 0;
+		repaint();
+	};
+};
+
 
 fn outline(x: size, y: size, w: size, h: size, c: u32) void = {
 	fb::fill(x, y, w, 1, c);
@@ -247,10 +720,42 @@ fn draw_shade(wi: size) void = {
 	const fc = if (hover == wi) FRAMEHI else FRAME;
 	fb::fill(wins[wi].wx, wins[wi].wy, wins[wi].ww, TITLE, TITLEBG);
 	fb::fill(wins[wi].wx, wins[wi].wy + TITLE - BORD, wins[wi].ww, BORD, fc);
-	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, "term", TITLEIDLE, TITLEBG);
+	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, title_of(wi), TITLEIDLE, TITLEBG);
+};
+
+// A drawing window: the frame of a terminal, with the program's picture inside
+// it instead of a grid of text, and the button that grows it over the screen.
+fn draw_gfx(wi: size) void = {
+	if (wins[wi].hidden) {
+		draw_shade(wi);
+		return;
+	};
+	const fc = if (hover == wi) FRAMEHI else FRAME;
+	fb::fill(wins[wi].wx, wins[wi].wy, wins[wi].ww, TITLE, TITLEBG);
+	if (hover == wi) {
+		fb::fill(wins[wi].wx, wins[wi].wy, wins[wi].ww, 1, FRAMEHI);
+	};
+	fb::fill(wins[wi].wx, wins[wi].wy + TITLE, BORD, wins[wi].wh - TITLE, fc);
+	fb::fill(wins[wi].wx + wins[wi].ww - BORD, wins[wi].wy + TITLE, BORD,
+		wins[wi].wh - TITLE, fc);
+	fb::fill(wins[wi].wx, wins[wi].wy + wins[wi].wh - BORD, wins[wi].ww, BORD,
+		fc);
+	fb::fill(wins[wi].wx + BORD, wins[wi].wy + TITLE + BORD,
+		wins[wi].ww - 2 * BORD, wins[wi].wh - TITLE - 2 * BORD, fb::WHITE);
+	if (wins[wi].gbuf != 0) {
+		fb::blit(wins[wi].wx + BORD, wins[wi].wy + TITLE + BORD,
+			wins[wi].gw, wins[wi].gh, wins[wi].gbuf, wins[wi].gw * 4);
+	};
+	const tc = if (wi == focus) fb::WHITE else TITLEIDLE;
+	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, title_of(wi), tc, TITLEBG);
+	draw_btn(wi);
 };
 
 fn draw_window(wi: size) void = {
+	if (wins[wi].graphic) {
+		draw_gfx(wi);
+		return;
+	};
 	if (wins[wi].hidden) {
 		draw_shade(wi);
 		return;
@@ -268,7 +773,7 @@ fn draw_window(wi: size) void = {
 	fb::fill(wins[wi].wx + BORD, wins[wi].wy + TITLE + BORD,
 		wins[wi].ww - 2 * BORD, wins[wi].wh - TITLE - 2 * BORD, fb::WHITE);
 	const tc = if (wi == focus) fb::WHITE else TITLEIDLE;
-	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, "term", tc, TITLEBG);
+	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, title_of(wi), tc, TITLEBG);
 	for (let r = 0z; r < wins[wi].rows; r += 1) {
 		line(wi, r);
 	};
@@ -397,6 +902,11 @@ fn edge_of(wi: size, x: size, y: size) u8 = {
 	if (wins[wi].hidden) {
 		return 0;
 	};
+	// A window over the whole screen has no frame left to grab: the button on
+	// its title bar is the way back.
+	if (wins[wi].full) {
+		return 0;
+	};
 	if (x < wins[wi].wx || x >= wins[wi].wx + wins[wi].ww
 			|| y < wins[wi].wy || y >= wins[wi].wy + wins[wi].wh) {
 		return 0;
@@ -496,6 +1006,10 @@ fn delete_window(wi: size) void = {
 	if (wi == NONE || !wins[wi].used) {
 		return;
 	};
+	if (wins[wi].graphic) {
+		gfree(wi);
+	};
+	wins[wi].graphic = false;
 	wins[wi].used = false;
 	let k = 0z;
 	for (let i = 0z; i < nz; i += 1) {
@@ -593,6 +1107,9 @@ fn scroll_to(wi: size, y: size) void = {
 };
 
 fn on_scrollbar(wi: size, x: size, y: size) bool = {
+	if (wins[wi].graphic) {
+		return false;
+	};
 	return x >= sbx(wi) && x < sbx(wi) + SB
 		&& y >= sby(wi) && y < sby(wi) + wins[wi].rows * fb::CH;
 };
@@ -666,6 +1183,10 @@ fn resize_drag() void = {
 		grab = 0;
 		return;
 	};
+	if (wins[wi].graphic) {
+		resize_gfx(wi);
+		return;
+	};
 	const cw = (fb::CW: int);
 	const ch = (fb::CH: int);
 	const bd = ((2 * BORD): int);
@@ -729,6 +1250,75 @@ fn resize_drag() void = {
 	apply_size(wi, nc, nr, nwx: size, nwy: size);
 };
 
+// Resizes a drawing window by whole pixels instead of character cells: what
+// counts is how much picture fits, and a game's picture is not a multiple of
+// any letter's width. The frame keeps its frame, the opposite edges stay put,
+// and the picture is made to fit whatever is left.
+fn resize_gfx(wi: size) void = {
+	const bd = ((2 * BORD): int);
+	const tb = ((TITLE + 2 * BORD): int);
+	const px = mx: int;
+	const py = my: int;
+	const rx1 = (gwx + gww): int;
+	const ry1 = (gwy + gwh): int;
+	let nww = gww: int;
+	let nwh = gwh: int;
+	if ((gedge & 1) != 0) {
+		nww = (gww: int) - (px - (grx: int));
+	};
+	if ((gedge & 2) != 0) {
+		nww = (gww: int) + (px - (grx: int));
+	};
+	if ((gedge & 4) != 0) {
+		nwh = (gwh: int) - (py - (gry: int));
+	};
+	if ((gedge & 8) != 0) {
+		nwh = (gwh: int) + (py - (gry: int));
+	};
+	// Small enough to be useless as a window is not worth having.
+	if (nww < bd + 64) {
+		nww = bd + 64;
+	};
+	if (nwh < tb + 48) {
+		nwh = tb + 48;
+	};
+	let nwx = gwx: int;
+	let nwy = gwy: int;
+	if ((gedge & 1) != 0) {
+		nwx = rx1 - nww;
+	};
+	if ((gedge & 4) != 0) {
+		nwy = ry1 - nwh;
+	};
+	if (nwx + nww > (fb::width(): int)) {
+		nwx = (fb::width(): int) - nww;
+	};
+	if (nwy + nwh > (fb::height(): int)) {
+		nwy = (fb::height(): int) - nwh;
+	};
+	if (nwx < 0) {
+		nwx = 0;
+	};
+	if (nwy < 0) {
+		nwy = 0;
+	};
+	if (nww == (gww: int) && nwh == (gwh: int)
+			&& (nwx: size) == gwx && (nwy: size) == gwy) {
+		return;
+	};
+	const nw = (nww: size) - 2 * BORD;
+	const nh = (nwh: size) - TITLE - 2 * BORD;
+	// The picture first: if there is no room for it the window keeps the size
+	// it already has, rather than ending up a frame around nothing.
+	if (!galloc(wi, nw, nh)) {
+		return;
+	};
+	wins[wi].wx = nwx: size;
+	wins[wi].wy = nwy: size;
+	wins[wi].ww = nww: size;
+	wins[wi].wh = nwh: size;
+};
+
 fn open_menu(which: u8) void = {
 	const mw = menu_w();
 	const mh = menu_h();
@@ -750,6 +1340,11 @@ fn menu_activate(sel: int) void = {
 		};
 		raise(wi);
 		focus = wi;
+		// Resizing starts from where the window really is, so a window that
+		// was over the whole screen comes back to its own size first.
+		if (wins[wi].graphic) {
+			set_full(wi, false);
+		};
 		fmode = 2;
 		gwin = wi;
 		gedge = 2 | 8;
@@ -765,6 +1360,9 @@ fn menu_activate(sel: int) void = {
 		};
 		raise(wi);
 		focus = wi;
+		if (wins[wi].graphic) {
+			set_full(wi, false);
+		};
 		fmode = 1;
 		gwin = wi;
 		gox = mx - wins[wi].wx;
@@ -789,6 +1387,13 @@ fn press1(x: size, y: size) void = {
 		wins[wi].hidden = false;
 		return;
 	};
+	// The square on the title bar of a drawing window, before anything else
+	// that lives up there: it grows the window over the whole screen or puts
+	// it back where it was.
+	if (wins[wi].graphic && over_btn(wi, x, y)) {
+		set_full(wi, !wins[wi].full);
+		return;
+	};
 	if (on_scrollbar(wi, x, y)) {
 		sbdrag = true;
 		sbwin = wi;
@@ -805,10 +1410,24 @@ fn press1(x: size, y: size) void = {
 	};
 };
 
-// Consumes the mouse deltas and button state.
-export fn mouse(dx: int, dy: int, btn: u8) void = {
+// Where a mouse event belongs: the drawing program when the pointer is on its
+// picture and no gesture of the desktop's is in the way, the desktop in every
+// other case. The motion in the answer is what the program should see, and
+// that is none of it when the pointer has wandered off the picture with a
+// button still down - a program that turns with the mouse must not turn
+// because the pointer was crossing a title bar.
+export type route = struct {
+	app: bool,
+	dx: int,
+	dy: int,
+};
+
+// Consumes the mouse deltas and button state, and says who they were for.
+export fn mouse(dx: int, dy: int, btn: u8) route = {
 	if (!on) {
-		return;
+		// There is no desktop to give the event to, so whoever is drawing at
+		// the screen is the only one who can want it.
+		return route { app = true, dx = dx, dy = dy };
 	};
 	mx = clampv((mx: int) + dx, ptr_lo_x(), ptr_hi_x()): size;
 	my = clampv((my: int) + dy, ptr_lo_y(), ptr_hi_y()): size;
@@ -819,6 +1438,28 @@ export fn mouse(dx: int, dy: int, btn: u8) void = {
 	const w2 = (lastbtn & 2u8) != 0;
 	const b3 = (btn & 4u8) != 0;
 	const w3 = (lastbtn & 4u8) != 0;
+
+	// Is the pointer on the picture of the drawing window that has the focus?
+	// That, with nothing else in the way, is what makes this the program's.
+	let here = false;
+	if (!menu_open && grab == 0 && fmode == 0 && !sbdrag) {
+		const g = focus;
+		here = g != NONE && g < MAXWIN && wins[g].used && wins[g].graphic
+			&& !wins[g].hidden && find_at(mx, my) == g
+			&& over_content(g, mx, my);
+	};
+	// A button pressed on the picture stays the program's until it comes up,
+	// so the release always reaches the program even if the pointer has left
+	// the window by then: losing it would leave the game firing forever.
+	let app = here;
+	if (here) {
+		appbtn = btn;
+	} else if ((appbtn & btn) != appbtn) {
+		app = true;
+	};
+	const mdx = if (here) dx else 0;
+	const mdy = if (here) dy else 0;
+	appbtn = appbtn & btn;
 
 	if (menu_open) {
 		menu_sel = menu_hit(mx, my);
@@ -831,6 +1472,10 @@ export fn mouse(dx: int, dy: int, btn: u8) void = {
 				menu_activate(sel);
 			};
 		};
+	} else if (here) {
+		// The picture belongs to the program: its buttons are not the
+		// desktop's to act on, and its window is already at hand.
+		void;
 	} else if (b3 && !w3) {
 		open_menu(4u8);
 	} else if (b2 && !w2) {
@@ -862,6 +1507,7 @@ export fn mouse(dx: int, dy: int, btn: u8) void = {
 
 	lastbtn = btn;
 	repaint();
+	return route { app = app, dx = mdx, dy = mdy };
 };
 
 // An escape sequence arrives one byte at a time and only means something once it
@@ -1087,14 +1733,14 @@ export fn putc(ch: u8) void = {
 // behind it, and reporting the display's size instead would push the bottom of
 // the program off the bottom of the window.
 export fn screen_rows() size = {
-	if (!on || focus == NONE || !wins[focus].used) {
+	if (!on || focus == NONE || !wins[focus].used || wins[focus].graphic) {
 		return 0;
 	};
 	return wins[focus].rows;
 };
 
 export fn screen_cols() size = {
-	if (!on || focus == NONE || !wins[focus].used) {
+	if (!on || focus == NONE || !wins[focus].used || wins[focus].graphic) {
 		return 0;
 	};
 	return wins[focus].cols;
@@ -1123,8 +1769,13 @@ export fn begin() void = {
 	menu_open = false;
 	sbdrag = false;
 	for (let i = 0z; i < MAXWIN; i += 1) {
+		if (wins[i].graphic && wins[i].gbuf != 0) {
+			gfree(i);
+		};
+		wins[i].graphic = false;
 		wins[i].used = false;
 	};
+	appbtn = 0;
 	const ww = 80 * fb::CW + 2 * BORD + SB;
 	const wh = TITLE + 2 * BORD + 22 * fb::CH;
 	mx = fb::width() / 2;

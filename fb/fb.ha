@@ -127,6 +127,27 @@ export fn present_rect(x: size, y: size, w: size, h: size) void = {
 	};
 };
 
+// Copies a rectangle of tightly packed 32-bit pixels from a buffer the caller
+// owns into the shadow, clipped to the screen. Nothing reaches the card, so a
+// caller can lay a whole picture out and show it later in one present; the
+// window manager uses it to repaint a drawing window from the copy it keeps
+// of the program's last frame.
+export fn blit(x: size, y: size, w: size, h: size, src: uintptr, spitch: size) void = {
+	if (addr == 0 || w == 0 || h == 0 || x >= fbw || y >= fbh) {
+		return;
+	};
+	if (x + w > fbw) {
+		w = fbw - x;
+	};
+	if (y + h > fbh) {
+		h = fbh - y;
+	};
+	for (let j = 0z; j < h; j += 1) {
+		const d = addr + ((y + j) * pitch + x * 4): uintptr;
+		architecture::memcpy(d, src + ((j * spitch): uintptr), w * 4);
+	};
+};
+
 export fn cell(x: size, y: size, ch: u8, fg: u32, bg: u32) void = {
 	fill(x, y, CW, CH, bg);
 	if (ch < ' ': u8 || ch > 0x7E) {

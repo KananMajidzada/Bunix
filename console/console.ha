@@ -152,7 +152,12 @@ export fn poll_mouse() void = {
 	const dy = mouse_dy();
 	const b = mouse_buttons();
 	if (dx != 0 || dy != 0 || b != lastbtn) {
-		kit::mouse(dx, dy, b);
+		const to = kit::mouse(dx, dy, b);
+		if (to.app) {
+			// The pointer was on a drawing program's picture, so its window
+			// gets the movement and the buttons through /dev/mouse.
+			mouse_note(to.dx, to.dy, b);
+		};
 		lastbtn = b;
 	};
 	kit::sync();

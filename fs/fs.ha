@@ -2,6 +2,7 @@ use architecture;
 use block;
 use console;
 use fb;
+use kit;
 use mem;
 use paging;
 use rt;
@@ -20,6 +21,8 @@ def MAXNS: size = 8;
 // and a full one of these node names is a little over 2 KiB.
 def BUFSZ: size = 4096;
 def NOCHILD: size = ~0z;
+// No drawing window, as the window manager answers a program that has none.
+def NOWIN: size = ~0z;
 
 export type node = struct {
 	nam: [32]u8,
@@ -413,11 +416,17 @@ fn gen_millis(buf: []u8) size = {
 };
 
 // The screen the framebuffer file describes, so a program that draws can lay
-// a frame out to fit it: width and height in pixels, as two numbers.
+// a frame out to fit it: width and height in pixels, as two numbers. A
+// program with a drawing window of its own is told that window's picture,
+// because that is the surface its writes to /dev/fb actually cover; a program
+// drawing at the screen is told the screen.
 fn gen_fbgeom(buf: []u8) size = {
 	let w: size = 0;
 	let h: size = 0;
-	fb::dev_dims(&w, &h);
+	kit::gfx_dims(&w, &h);
+	if (w == 0 || h == 0) {
+		fb::dev_dims(&w, &h);
+	};
 	let n = put_num(buf, w: u64);
 	buf[n] = ' ': u8;
 	n += 1;
@@ -579,6 +588,103 @@ fn kbd_read(buf: []u8, off: u64, n: size) size = {
 		got += 8;
 	};
 	return got;
+};
+
+// /dev/mouse, the pointer as a program that draws rather than types reads it:
+// one 64-bit word per event, movement in the low 16 bits and the next 16,
+// both signed, and the buttons at byte 4. Where the read starts means nothing
+// to a queue, so the offset goes unheeded, and no word comes back when the
+// pointer has not moved: a game polls this between frames.
+fn mouse_read(buf: []u8, off: u64, n: size) size = {
+	_ = off;
+	let got = 0z;
+	for (got + 8 <= n) {
+		let e = 0u64;
+		if (!console::mouseev(&e)) {
+			break;
+		};
+		for (let i = 0z; i < 8; i += 1) {
+			buf[got + i] = ((e >> ((i * 8): u64)) & 0xFF): u8;
+		};
+		got += 8;
+	};
+	return got;
+};
+
+// /dev/fb as the caller sees it. A program with a drawing window of its own
+// writes frames there and they land in that window, sized to it; a program
+// with no window, such as a test that fills the display with a pattern, still
+// writes at the screen itself.
+fn fb_write(data: []u8, off: u64) size = {
+	const wi = kit::gfx_window();
+	if (wi != NOWIN) {
+		return kit::draw_frame(wi, data, off);
+	};
+	if (sched::is_gfx(sched::current_id())) {
+		// The window this thread draws into is gone. Its picture has nowhere
+		// to go, and the screen is not the desktop's to take over.
+		return 0;
+	};
+	return fb::dev_write(data, off);
+};
+
+fn fb_read(buf: []u8, off: u64, n: size) size = {
+	const wi = kit::gfx_window();
+	if (wi != NOWIN) {
+		return kit::read_frame(wi, buf, off, n);
+	};
+	return fb::dev_read(buf, off, n);
+};
+
+// /dev/win, a program's own drawing window as a file. Reading it gives the
+// size of the picture the program draws into - zero by zero when it has no
+// window. Writing the program's name is what asks for a window in the first
+// place, and writing at offset 1 switches it between the whole screen and its
+// own place on the desktop: '1' fills the screen, '0' puts it back, anything
+// else switches.
+fn win_read(buf: []u8, off: u64, n: size) size = {
+	_ = off;
+	if (n < 8) {
+		return 0;
+	};
+	let w = 0z;
+	let h = 0z;
+	kit::gfx_dims(&w, &h);
+	let k = put_num(buf, w: u64);
+	buf[k] = ' ': u8;
+	k += 1;
+	k += put_num(buf[k..], h: u64);
+	buf[k] = '\n': u8;
+	k += 1;
+	return k;
+};
+
+fn win_write(data: []u8, off: u64) size = {
+	const id = sched::current_id();
+	if (off == 1) {
+		const wi = kit::gfx_window();
+		if (wi == NOWIN || len(data) == 0) {
+			return 0;
+		};
+		kit::control_full(wi, data[0]);
+		return len(data);
+	};
+	if (off != 0) {
+		return 0;
+	};
+	// The name, and with it the window itself. It is made for the calling
+	// thread: the window is focused at once, so the program gets the keys and
+	// the pointer, while its own output carries on going to the terminal it
+	// was started in.
+	const from = kit::out_target();
+	const wi = kit::claim_gfx(data, id, from);
+	if (wi == NOWIN) {
+		return 0;
+	};
+	kit::set_out_win(wi);
+	sched::bind_win(id, wi);
+	sched::set_gfx(id, true);
+	return len(data);
 };
 
 // Byte-order helpers for the on-disk format. The superblock lives in sector 0:
@@ -794,6 +900,14 @@ export fn init() void = {
 	// expects somewhere writable to exist without creating it first.
 	link(root, mknode("tmp", true));
 
+	// The shareware DOOM data file, folded into the kernel by the build and
+	// served here like any other file in the root directory. It is too big
+	// for a Hare byte table, so it arrives as an .incbin and the node holds
+	// a slice across it.
+	const wad = mknode("doom1.wad", false);
+	nodes[wad].content = user::wad();
+	link(root, wad);
+
 	// /usr/include holds the compiler's own headers, and /usr/src the examples
 	// it is expected to be able to compile. Both are tables built at compile
 	// time by tools/embed.py.
@@ -869,10 +983,12 @@ export fn init() void = {
 	link(dev, stage2);
 
 	// The screen as a file: pixels packed 32-bit, tightly, width by height.
-	// Writing it draws; reading it takes back what is on the screen.
+	// Writing it draws; reading it takes back what is on the screen. A
+	// program with a drawing window of its own is answered out of that
+	// window instead, as fb_write and fb_read above decide.
 	const fbdev = mknode("fb", false);
-	nodes[fbdev].gdsk = &fb::dev_read;
-	nodes[fbdev].wdsk = &fb::dev_write;
+	nodes[fbdev].gdsk = &fb_read;
+	nodes[fbdev].wdsk = &fb_write;
 	link(dev, fbdev);
 
 	// The keyboard as a file: key edges, make and break, for a program that
@@ -880,6 +996,20 @@ export fn init() void = {
 	const kbd = mknode("kbd", false);
 	nodes[kbd].gdsk = &kbd_read;
 	link(dev, kbd);
+
+	// The pointer as a file: movement and buttons as 64-bit words, for the
+	// program whose window the pointer is on.
+	const mousefile = mknode("mouse", false);
+	nodes[mousefile].gdsk = &mouse_read;
+	link(dev, mousefile);
+
+	// A drawing window as a file: read it for the size of the picture to
+	// draw, write the program's name to ask for a window of one's own, and
+	// write at offset 1 to fill the screen with it or put it back.
+	const winfile = mknode("win", false);
+	nodes[winfile].gdsk = &win_read;
+	nodes[winfile].wdsk = &win_write;
+	link(dev, winfile);
 
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
@@ -1332,7 +1462,23 @@ export fn read_at(path: str, off: u64, dest: []u8) size = {
 		return g(dest, off, len(dest));
 	case null => void;
 	};
-	// A file that is held whole: the part from the offset on.
+	// A file held whole: its bytes are in memory already, so the part from
+	// the offset on is copied straight out, however big the file is - a
+	// game's data file is megabytes, and staging it through the scratch
+	// buffer would serve it four kilobytes at a time and no further.
+	if (!nd.isdir && !nd.writable && nd.gen == null) {
+		const all = len(nd.content);
+		if (off >= (all: u64)) {
+			return 0;
+		};
+		let n = all - (off: size);
+		if (n > len(dest)) {
+			n = len(dest);
+		};
+		copy_bytes(dest, nd.content[(off: size)..], n);
+		return n;
+	};
+	// Everything else is read whole and served from the offset on.
 	const whole = read_node(id, filebuf[..]);
 	if (off >= (whole: u64)) {
 		return 0;
@@ -1517,22 +1663,27 @@ export fn create(path: str, isdir: bool) bool = {
 	// in the directory the process is in rather than nowhere at all.
 	const p = resolve(*(&path: *[]u8));
 	const pb = *(&p: *[]u8);
-	let slash = NOCHILD;
-	for (let i = 0z; i < len(pb); i += 1) {
-		if (pb[i] == ('/': u8)) {
-			slash = i;
-		};
-	};
-	if (slash == NOCHILD) {
-		return false;
-	};
-	// A path that ends in a slash names a directory.
+	// A path that ends in a slash names a directory. The slash is taken
+	// off before the name is cut out, so /tmp/foo/ names foo.
 	let end = len(pb);
 	if (end > 0 && pb[end - 1] == ('/': u8)) {
 		end -= 1;
 	};
+	let slash = NOCHILD;
+	for (let i = 0z; i < end; i += 1) {
+		if (pb[i] == ('/': u8)) {
+			slash = i;
+		};
+	};
+	// Nothing after the last slash names nothing at all: the root itself,
+	// or a name like "." once it is resolved. A program may well ask to
+	// make a directory that is really the root - DOOM asks to make its
+	// configuration directory, which is "." - and the answer is no.
+	if (slash == NOCHILD || slash + 1 >= end) {
+		return false;
+	};
 	const base = pb[slash + 1..end];
-	if (len(base) == 0 || len(base) > 31) {
+	if (len(base) > 31) {
 		return false;
 	};
 	const pid = lookup_abs(pb[..slash]);

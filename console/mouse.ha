@@ -119,3 +119,83 @@ export fn mouse_dy() int = {
 };
 
 export fn mouse_buttons() u8 = mouse_btns;
+
+// ---------------------------------------------------------------------------
+// The mouse as a program sees it, through /dev/mouse.
+//
+// Each event is one 64-bit word: the movement since the last one in the low
+// 16 bits and the next 16, both signed, and the buttons at byte 4 with bit 0
+// for the left button, 1 for the right and 2 for the middle. A word with no
+// movement in it is still worth having when the buttons changed, and the
+// buttons come as they are now rather than as edges, so a program that has
+// missed a whole burst still knows what is down.
+//
+// Movement folds into the word waiting to be read while the buttons stay as
+// they are, so a quick hand is never outrun by a game busy drawing a frame.
+
+def MEVQ: size = 64;
+let mq_dx: [MEVQ]int = [0...];
+let mq_dy: [MEVQ]int = [0...];
+let mq_b: [MEVQ]u8 = [0...];
+let mhead = 0z;
+let mn = 0z;
+
+// Files mouse movement and the button state for the program that is drawing.
+export fn mouse_note(dx: int, dy: int, b: u8) void = {
+	const irq = architecture::irq_save();
+	if (mn > 0) {
+		const t = (mhead + mn - 1) % MEVQ;
+		if (mq_b[t] == b && (dx != 0 || dy != 0)) {
+			let x = mq_dx[t] + dx;
+			let y = mq_dy[t] + dy;
+			// A word holds 16 bits of each; past that the excess is dropped
+			// rather than allowed to wrap into the wrong direction.
+			if (x > 32767) {
+				x = 32767;
+			};
+			if (x < -32768) {
+				x = -32768;
+			};
+			if (y > 32767) {
+				y = 32767;
+			};
+			if (y < -32768) {
+				y = -32768;
+			};
+			mq_dx[t] = x;
+			mq_dy[t] = y;
+			architecture::irq_restore(irq);
+			return;
+		};
+	};
+	if (mn == MEVQ) {
+		// Nobody is reading fast enough. The oldest word goes, so what is
+		// missing is the movement rather than the buttons.
+		mhead = (mhead + 1) % MEVQ;
+		mn -= 1;
+	};
+	const t = (mhead + mn) % MEVQ;
+	mq_dx[t] = dx;
+	mq_dy[t] = dy;
+	mq_b[t] = b;
+	mn += 1;
+	architecture::irq_restore(irq);
+};
+
+// The next word, or false when no event is waiting: a program polls this
+// between frames rather than blocking on it.
+export fn mouseev(out: *u64) bool = {
+	const irq = architecture::irq_save();
+	if (mn == 0) {
+		architecture::irq_restore(irq);
+		return false;
+	};
+	const i = mhead;
+	*out = ((mq_dx[i]: u64) & 0xFFFF)
+		| (((mq_dy[i]: u64) & 0xFFFF) << 16)
+		| (((mq_b[i]: u64) & 0xFF) << 32);
+	mhead = (mhead + 1) % MEVQ;
+	mn -= 1;
+	architecture::irq_restore(irq);
+	return true;
+};
