@@ -51,9 +51,11 @@ export fn start_hare(mbi: uintptr) never = {
 	halt();
 };
 
-// Where the kernel was loaded, and how much of it there is.
+// Where the kernel was loaded, and how much of it there is. The kernel is
+// linked and loaded at 64 MiB, above the user window, so that the per-space
+// pages at 4..36 MiB never shadow the kernel's own.
 export fn image_base() uintptr = {
-	return 0x100000;
+	return 0x04000000;
 };
 
 export fn image_size() uintptr = {

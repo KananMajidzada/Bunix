@@ -27,7 +27,7 @@ _start:
 	movl %ebx, lbanow
 	movl 0x0C(%eax), %ebx	# how many sectors
 	movl %ebx, sectors
-	movl $0x100000, %eax
+	movl $0x04000000, %eax
 	movl %eax, dest
 
 	# The kernel, a piece at a time.
@@ -246,7 +246,7 @@ protected2:
 	# register and the address to jump to in another.
 	movl $0x7D80, %eax
 	movzwl 0x14(%eax), %ecx	# where in the kernel to start
-	movl $0x100000, %edx
+	movl $0x04000000, %edx
 	addl %ecx, %edx
 	movl $0x7000, %ebx
 	movl $0x2BADB002, %eax

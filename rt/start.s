@@ -5,7 +5,7 @@ multiboot_header:
 .long 0x00010007				/* flags: modules, memory, a.out kludge, video */
 .long -(0x1BADB002 + 0x00010007)		/* checksum */
 .long multiboot_header				/* header address */
-.long 0x00100000				/* load address */
+.long 0x04000000				/* load address */
 .long 0						/* load end: whole file */
 .long _kernel_end				/* bss end */
 .long _start					/* entry */

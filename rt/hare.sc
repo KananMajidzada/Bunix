@@ -2,7 +2,10 @@ OUTPUT_FORMAT(elf64-x86-64)
 ENTRY(_start)
 
 SECTIONS {
-	. = 0x00100000;
+	# The kernel is linked high, at 64 MiB, so that the user window at
+	# 4..36 MiB - which every address space replaces with its own pages -
+	# never shadows the kernel's own data and stack.
+	. = 0x04000000;
 
 	.multiboot : ALIGN(4) {
 		KEEP(*(.multiboot))
