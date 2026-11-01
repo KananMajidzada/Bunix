@@ -197,6 +197,8 @@ The disk is a file, so a copy of it is a copy of everything on it.
 
 ## DOOM
 
+![doom](doc/doom.png)
+
 DOOM runs on Bunix as a plain user-space program, in a window on the kit
 desktop, keyboard only. The game lives in its own folder:
 
