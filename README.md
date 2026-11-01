@@ -199,8 +199,7 @@ The disk is a file, so a copy of it is a copy of everything on it.
 
 ![doom](doc/doom.png)
 
-DOOM runs on Bunix as a plain user-space program, in a window on the kit
-desktop, keyboard only. The game lives in its own folder:
+DOOM runs on Bunix as a plain user-space program.Controls are keyboard only.
 
 	ush> cd /Doom
 	ush> ls
@@ -224,10 +223,6 @@ Controls, keyboard only:
 	Esc           menu
 	F1 - F9       help, ammo, health, keys, ... (DOOM's own screens)
 
-There is no fullscreen button. Like Plan 9, resize *is* fullscreen: drag a
-window edge or corner out to the screen edge and the window fills the
-display, border and title bar included — drag it back in to shrink it.
-DOOM re-lays itself out to whatever size its window is.
 
 ## Fun
 
