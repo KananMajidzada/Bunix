@@ -290,7 +290,8 @@ user/progs.ha: build/progs.bin $(PROG_ELFS)
 	   printf '];\n'; } > $@
 
 run: bunix.bin
-	$(QEMU) -m 256 -kernel bunix.bin -serial stdio
+	$(QEMU) -m 256 -kernel bunix.bin -serial stdio \
+	       -audiodev pa,id=pa0 -M pcspk-audiodev=pa0
 
 run-nographic: bunix.bin
 	$(QEMU) -m 256 -kernel bunix.bin -display none -serial stdio
