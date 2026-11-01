@@ -638,10 +638,11 @@ fn fb_read(buf: []u8, off: u64, n: size) size = {
 
 // /dev/win, a program's own drawing window as a file. Reading it gives the
 // size of the picture the program draws into - zero by zero when it has no
-// window. Writing the program's name is what asks for a window in the first
-// place, and writing at offset 1 switches it between the whole screen and its
-// own place on the desktop: '1' fills the screen, '0' puts it back, anything
-// else switches.
+// window, and a new number whenever the player has dragged the window to
+// another size. Writing the program's name is what asks for a window in the
+// first place; there is nothing else to ask for: a player who wants a bigger
+// picture drags the window's edges until it covers as much of the screen as
+// they like, and the program finds that out by reading this file again.
 fn win_read(buf: []u8, off: u64, n: size) size = {
 	_ = off;
 	if (n < 8) {
@@ -660,15 +661,6 @@ fn win_read(buf: []u8, off: u64, n: size) size = {
 };
 
 fn win_write(data: []u8, off: u64) size = {
-	const id = sched::current_id();
-	if (off == 1) {
-		const wi = kit::gfx_window();
-		if (wi == NOWIN || len(data) == 0) {
-			return 0;
-		};
-		kit::control_full(wi, data[0]);
-		return len(data);
-	};
 	if (off != 0) {
 		return 0;
 	};
@@ -676,6 +668,7 @@ fn win_write(data: []u8, off: u64) size = {
 	// thread: the window is focused at once, so the program gets the keys and
 	// the pointer, while its own output carries on going to the terminal it
 	// was started in.
+	const id = sched::current_id();
 	const from = kit::out_target();
 	const wi = kit::claim_gfx(data, id, from);
 	if (wi == NOWIN) {
@@ -900,13 +893,24 @@ export fn init() void = {
 	// expects somewhere writable to exist without creating it first.
 	link(root, mknode("tmp", true));
 
-	// The shareware DOOM data file, folded into the kernel by the build and
-	// served here like any other file in the root directory. It is too big
-	// for a Hare byte table, so it arrives as an .incbin and the node holds
-	// a slice across it.
+	// DOOM, as an application with a folder of its own rather than loose
+	// files in the root: /Doom holds the game's program image and its data
+	// file, like a directory of installed software. The program is named by
+	// its last path element wherever it is written down, so doom, /bin/doom
+	// and /Doom/doom are all the same image and can all be run.
+	const doomdir = mknode("Doom", true);
+	link(root, doomdir);
 	const wad = mknode("doom1.wad", false);
 	nodes[wad].content = user::wad();
-	link(root, wad);
+	link(doomdir, wad);
+	const doomimg = mknode("doom", false);
+	nodes[doomimg].content = [];
+	for (let i = 0z; i < len(user::programs); i += 1) {
+		if (user::programs[i].nam == "doom") {
+			nodes[doomimg].fsize = user::programs[i].bytes: u64;
+		};
+	};
+	link(doomdir, doomimg);
 
 	// /usr/include holds the compiler's own headers, and /usr/src the examples
 	// it is expected to be able to compile. Both are tables built at compile

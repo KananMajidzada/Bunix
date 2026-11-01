@@ -195,6 +195,38 @@ To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 
 The disk is a file, so a copy of it is a copy of everything on it.
 
+## DOOM
+
+DOOM runs on Bunix as a plain user-space program, in a window on the kit
+desktop, keyboard only. The game lives in its own folder:
+
+	ush> cd /Doom
+	ush> ls
+	doom1.wad  doom
+	ush> doom
+
+`/Doom/doom` works from anywhere too. Everything is a file: the window is
+`/dev/win`, the keys arrive on `/dev/kbd`, and the framebuffer it draws on
+is `/dev/fb` — DOOM is just a program reading and writing files.
+
+Controls, keyboard only:
+
+	Arrows        move / turn
+	Shift         run
+	Ctrl          fire
+	Alt (hold)    strafe with the arrows
+	, and .       strafe left / right
+	Space         use (open doors, press switches)
+	Tab           map
+	1 - 7         weapons
+	Esc           menu
+	F1 - F9       help, ammo, health, keys, ... (DOOM's own screens)
+
+There is no fullscreen button. Like Plan 9, resize *is* fullscreen: drag a
+window edge or corner out to the screen edge and the window fills the
+display, border and title bar included — drag it back in to shrink it.
+DOOM re-lays itself out to whatever size its window is.
+
 ## Fun
 
 Right now Bunix have mascot calling "BunBun the Hare". 

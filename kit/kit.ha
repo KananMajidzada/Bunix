@@ -36,9 +36,6 @@ def MENUSEL: u32 = 0x3B3B3B;
 
 def MI: size = 6;
 def IH: size = 20;
-// The square on a drawing window's title bar that fills the screen with it,
-// or puts it back where it was.
-def GBTN: size = 14;
 // The size a drawing window starts at: the game's own picture, one pixel of
 // it to one pixel of the window, with nothing scaled until the player asks
 // for more window than that.
@@ -86,8 +83,6 @@ type win = struct {
 	gbuf: uintptr,		// the picture, gw by gh 32-bit pixels
 	gpages: size,		// the frames gbuf was taken from
 	gw: size, gh: size,	// the picture's size, which is the program's screen
-	full: bool,			// grown over the whole display
-	fsavx: size, fsavy: size, fsvw: size, fsvh: size,	// where it was before
 	gname: [16]u8, gnlen: size,	// what the title bar calls it
 	owner: size,		// the thread the window was made for
 	gterm: size,		// the terminal that thread's own words still go to
@@ -377,87 +372,6 @@ fn over_content(wi: size, x: size, y: size) bool = {
 		&& y < wins[wi].wy + TITLE + BORD + wins[wi].gh;
 };
 
-// The square on the title bar that fills the screen with a drawing window or
-// puts it back, and whether the pointer is on it.
-fn btn_x(wi: size) size = wins[wi].wx + wins[wi].ww - GBTN - 6;
-fn btn_y(wi: size) size = wins[wi].wy + (TITLE - GBTN) / 2;
-
-fn over_btn(wi: size, x: size, y: size) bool = {
-	return x >= btn_x(wi) && x < btn_x(wi) + GBTN
-		&& y >= btn_y(wi) && y < btn_y(wi) + GBTN;
-};
-
-fn draw_btn(wi: size) void = {
-	const x = btn_x(wi);
-	const y = btn_y(wi);
-	const hot = mx >= x && mx < x + GBTN && my >= y && my < y + GBTN;
-	const bg = if (hot) FRAME else TITLEBG;
-	const fg = if (wi == focus) fb::WHITE else TITLEIDLE;
-	fb::fill(x, y, GBTN, GBTN, bg);
-	if (wins[wi].full) {
-		// A square inside a square: back to a window again.
-		outline(x + 3, y + 3, GBTN - 6, GBTN - 6, fg);
-	} else {
-		// A solid square: grow over the whole screen.
-		outline(x, y, GBTN, GBTN, fg);
-		fb::fill(x + 3, y + 3, GBTN - 6, GBTN - 6, fg);
-	};
-};
-
-// Grows the window over the whole display, or puts it back where it was. The
-// picture is made to fit either way and keeps what still fits of itself, and
-// the program finds out by asking /dev/win for its size again.
-fn set_full(wi: size, on2: bool) void = {
-	if (wi == NONE || !wins[wi].used || !wins[wi].graphic
-			|| wins[wi].full == on2) {
-		return;
-	};
-	if (on2) {
-		const w = fb::width() - 2 * BORD;
-		const h = fb::height() - TITLE - 2 * BORD;
-		if (!galloc(wi, w, h)) {
-			return;
-		};
-		wins[wi].fsavx = wins[wi].wx;
-		wins[wi].fsavy = wins[wi].wy;
-		wins[wi].fsvw = wins[wi].ww;
-		wins[wi].fsvh = wins[wi].wh;
-		wins[wi].wx = 0;
-		wins[wi].wy = 0;
-		wins[wi].ww = fb::width();
-		wins[wi].wh = fb::height();
-	} else {
-		const w = wins[wi].fsvw - 2 * BORD;
-		const h = wins[wi].fsvh - TITLE - 2 * BORD;
-		if (!galloc(wi, w, h)) {
-			return;
-		};
-		wins[wi].wx = wins[wi].fsavx;
-		wins[wi].wy = wins[wi].fsavy;
-		wins[wi].ww = wins[wi].fsvw;
-		wins[wi].wh = wins[wi].fsvh;
-	};
-	wins[wi].full = on2;
-	raise(wi);
-	focus = wi;
-	repaint();
-};
-
-// The fullscreen a program asked for through /dev/win: '1' fills the screen,
-// '0' puts the window back, anything else switches between the two.
-export fn control_full(wi: size, c: u8) void = {
-	if (wi == NONE || !wins[wi].used || !wins[wi].graphic) {
-		return;
-	};
-	if (c == ('1': u8)) {
-		set_full(wi, true);
-	} else if (c == ('0': u8)) {
-		set_full(wi, false);
-	} else {
-		set_full(wi, !wins[wi].full);
-	};
-};
-
 // Shows the picture now in the window: the pixels go into the shadow, then
 // whatever the desktop drew over them afterwards is put back on top of them,
 // and only the rectangles that really changed reach the card. The program
@@ -614,11 +528,6 @@ export fn claim_gfx(name: []u8, id: size, from: size) size = {
 	wins[wi].gpages = 0;
 	wins[wi].gw = 0;
 	wins[wi].gh = 0;
-	wins[wi].full = false;
-	wins[wi].fsavx = 0;
-	wins[wi].fsavy = 0;
-	wins[wi].fsvw = 0;
-	wins[wi].fsvh = 0;
 	wins[wi].owner = id;
 	wins[wi].gterm = if (from == wi) NONE else from;
 	set_name(wi, name);
@@ -748,7 +657,6 @@ fn draw_gfx(wi: size) void = {
 	};
 	const tc = if (wi == focus) fb::WHITE else TITLEIDLE;
 	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, title_of(wi), tc, TITLEBG);
-	draw_btn(wi);
 };
 
 fn draw_window(wi: size) void = {
@@ -902,11 +810,6 @@ fn edge_of(wi: size, x: size, y: size) u8 = {
 	if (wins[wi].hidden) {
 		return 0;
 	};
-	// A window over the whole screen has no frame left to grab: the button on
-	// its title bar is the way back.
-	if (wins[wi].full) {
-		return 0;
-	};
 	if (x < wins[wi].wx || x >= wins[wi].wx + wins[wi].ww
 			|| y < wins[wi].wy || y >= wins[wi].wy + wins[wi].wh) {
 		return 0;
@@ -915,13 +818,27 @@ fn edge_of(wi: size, x: size, y: size) u8 = {
 	if (x < wins[wi].wx + EDGE) {
 		e |= 1;
 	};
-	if (x + EDGE >= wins[wi].wx + wins[wi].ww) {
+	// The right and bottom edges have to stay within the pointer's own
+	// reach, which stops a little short of the screen's edge because the
+	// pointer's art has to stay on it. A window grown over the whole screen
+	// has both of those edges out past that reach, so without this a player
+	// who had filled the screen could not take the window back down again
+	// by the corner they got there with.
+	let rz = wins[wi].wx + wins[wi].ww - EDGE;
+	if (rz > (ptr_hi_x(): size)) {
+		rz = ptr_hi_x(): size;
+	};
+	if (x >= rz) {
 		e |= 2;
 	};
 	if (y < wins[wi].wy + EDGE) {
 		e |= 4;
 	};
-	if (y + EDGE >= wins[wi].wy + wins[wi].wh) {
+	let bz = wins[wi].wy + wins[wi].wh - EDGE;
+	if (bz > (ptr_hi_y(): size)) {
+		bz = ptr_hi_y(): size;
+	};
+	if (y >= bz) {
 		e |= 8;
 	};
 	return e;
@@ -1290,17 +1207,43 @@ fn resize_gfx(wi: size) void = {
 	if ((gedge & 4) != 0) {
 		nwy = ry1 - nwh;
 	};
-	if (nwx + nww > (fb::width(): int)) {
-		nwx = (fb::width(): int) - nww;
+	// An edge being dragged stops at the screen's own edge, so a window can
+	// be grown until it fills the screen - that is how a player asks for a
+	// full screen of a game: there is no other way, and none needed. The
+	// pointer itself stops a little short of the edge - its art has to stay
+	// on the screen - so once it has been pushed out as far as it goes, the
+	// window's edge goes the rest of the way and lands on the screen's.
+	if ((gedge & 2) != 0) {
+		if (px >= (fb::width(): int) - (PW: int)) {
+			nww = (fb::width(): int) - (gwx: int);
+		} else if (nww > (fb::width(): int) - (gwx: int)) {
+			nww = (fb::width(): int) - (gwx: int);
+		};
 	};
-	if (nwy + nwh > (fb::height(): int)) {
-		nwy = (fb::height(): int) - nwh;
+	if ((gedge & 8) != 0) {
+		if (py >= (fb::height(): int) - (PH: int)) {
+			nwh = (fb::height(): int) - (gwy: int);
+		} else if (nwh > (fb::height(): int) - (gwy: int)) {
+			nwh = (fb::height(): int) - (gwy: int);
+		};
 	};
 	if (nwx < 0) {
 		nwx = 0;
 	};
 	if (nwy < 0) {
 		nwy = 0;
+	};
+	// The far edge of a left- or top-dragged window is where it already was,
+	// so once the near edge has been pulled as far as it goes the size stops
+	// there too, rather than carrying the far edge off the screen. Only the
+	// edge being dragged can move: a right- or bottom-drag leaves the far
+	// edge where it is by itself, and clamping there would stop the window
+	// from ever growing.
+	if ((gedge & 1) != 0 && nww > rx1 - nwx) {
+		nww = rx1 - nwx;
+	};
+	if ((gedge & 4) != 0 && nwh > ry1 - nwy) {
+		nwh = ry1 - nwy;
 	};
 	if (nww == (gww: int) && nwh == (gwh: int)
 			&& (nwx: size) == gwx && (nwy: size) == gwy) {
@@ -1340,11 +1283,6 @@ fn menu_activate(sel: int) void = {
 		};
 		raise(wi);
 		focus = wi;
-		// Resizing starts from where the window really is, so a window that
-		// was over the whole screen comes back to its own size first.
-		if (wins[wi].graphic) {
-			set_full(wi, false);
-		};
 		fmode = 2;
 		gwin = wi;
 		gedge = 2 | 8;
@@ -1360,9 +1298,6 @@ fn menu_activate(sel: int) void = {
 		};
 		raise(wi);
 		focus = wi;
-		if (wins[wi].graphic) {
-			set_full(wi, false);
-		};
 		fmode = 1;
 		gwin = wi;
 		gox = mx - wins[wi].wx;
@@ -1385,13 +1320,6 @@ fn press1(x: size, y: size) void = {
 	focus = wi;
 	if (wins[wi].hidden) {
 		wins[wi].hidden = false;
-		return;
-	};
-	// The square on the title bar of a drawing window, before anything else
-	// that lives up there: it grows the window over the whole screen or puts
-	// it back where it was.
-	if (wins[wi].graphic && over_btn(wi, x, y)) {
-		set_full(wi, !wins[wi].full);
 		return;
 	};
 	if (on_scrollbar(wi, x, y)) {

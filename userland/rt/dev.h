@@ -34,7 +34,8 @@ static inline int bunix_mouse_event(uint64_t *ev) {
 }
 
 // The size of the picture the program draws into, read from /dev/win. It
-// changes when the window is resized or filled with the screen, so a program
+// changes when the player has dragged the window to another size - a program
+// can grow its window all the way to the screen's own edges - so a program
 // can lay out a frame that fits however large the window has become.
 static inline int bunix_win_dims(uint32_t *w, uint32_t *h) {
     char buf[32];
@@ -61,14 +62,6 @@ static inline int bunix_win_dims(uint32_t *w, uint32_t *h) {
 static inline int bunix_win_open(const char *name, uint32_t *w, uint32_t *h) {
     if (bunix_writeat("/dev/win", 0, name, path_len(name)) <= 0) return -1;
     return bunix_win_dims(w, h);
-}
-
-// Fills the screen with the drawing window, or puts it back where it was.
-// '1' is fullscreen, '0' is the window again, and any other byte switches
-// between the two - which is what the square on the title bar does, so the
-// two ways of asking always agree. Fails without a window of one's own.
-static inline int bunix_win_full(char mode) {
-    return bunix_writeat("/dev/win", 1, &mode, 1) == 1 ? 0 : -1;
 }
 
 // The screen's size in pixels, read from /proc/fb. Returns 0 on success and
