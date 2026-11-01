@@ -7,6 +7,7 @@ use mem;
 use paging;
 use rt;
 use sched;
+use sound;
 use sys;
 use user;
 
@@ -680,6 +681,85 @@ fn win_write(data: []u8, off: u64) size = {
 	return len(data);
 };
 
+// /dev/speaker, the beeper as a file. A write is a tune: pairs of
+// numbers, the length of a note in milliseconds and its pitch in
+// hertz, with spaces or newlines between them and a zero pitch for a
+// rest. The write does not come back until the tune is over, so its
+// length is the length of the music:
+//
+//	write /dev/speaker '200 660 200 880 400 440'
+//
+// A note is a minute at most and a tune half a minute, so a line with
+// a wrong number in it holds up the shell for a while and no longer.
+// Anything that is not a number ends the tune where it stands.
+fn speaker_write(data: []u8, off: u64) size = {
+	_ = off;
+	let i = 0z;
+	let total = 0u64;
+	for (i < len(data)) {
+		for (i < len(data) && spk_ws(data[i])) {
+			i += 1;
+		};
+		if (i >= len(data)) {
+			break;
+		};
+		let dur = 0u64;
+		let j = i;
+		if (!spk_atoi(data, i, &j, &dur)) {
+			break;
+		};
+		i = j;
+		for (i < len(data) && spk_ws(data[i])) {
+			i += 1;
+		};
+		let pitch = 0u64;
+		if (!spk_atoi(data, i, &j, &pitch)) {
+			break;
+		};
+		i = j;
+		if (dur > 60000) {
+			dur = 60000;
+		};
+		if (total + dur > 30000) {
+			break;
+		};
+		total += dur;
+		sound::tone(pitch, dur);
+	};
+	return len(data);
+};
+
+// The number starting at s[i]: its value in v, one past its last byte
+// in j. The answer is false when there is no number there, and then
+// nothing has moved.
+fn spk_atoi(s: []u8, i: size, j: *size, v: *u64) bool = {
+	let k = i;
+	for (k < len(s) && s[k] >= ('0': u8) && s[k] <= ('9': u8)) {
+		k += 1;
+	};
+	if (k == i) {
+		return false;
+	};
+	let acc = 0u64;
+	for (let n = i; n < k; n += 1) {
+		// Eight digits is more than any note or pitch needs, so a
+		// longer number keeps its first digits instead of running
+		// over into the wrong note.
+		if (acc < 10000000) {
+			acc = (acc * 10) + ((s[n] - ('0': u8)): u64);
+		};
+	};
+	*j = k;
+	*v = acc;
+	return true;
+};
+
+// What can come between the two halves of a pair.
+fn spk_ws(c: u8) bool = {
+	return c == (' ': u8) || c == ('\n': u8) || c == ('\t': u8)
+		|| c == ('\r': u8);
+};
+
 // Byte-order helpers for the on-disk format. The superblock lives in sector 0:
 // magic "BUNX2" at byte 0, the root directory block at byte 8, the next free
 // block at byte 12. A directory block is a count byte followed by 42-byte
@@ -1014,6 +1094,14 @@ export fn init() void = {
 	nodes[winfile].gdsk = &win_read;
 	nodes[winfile].wdsk = &win_write;
 	link(dev, winfile);
+
+	// The speaker as a file: a write is a tune and does not come back
+	// until the tune is over. It is the device a program makes music
+	// with by writing numbers to it, the way it writes bytes to any
+	// other file.
+	const spk = mknode("speaker", false);
+	nodes[spk].wdsk = &speaker_write;
+	link(dev, spk);
 
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
