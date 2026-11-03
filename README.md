@@ -9,7 +9,7 @@ It boots into a small window manager Kit.
 
 ![windows](doc/windows.png)
 
-tcc is part of the system. Write some C, compile it, run it, without leaving.
+tcc is part of the system.
 
 ![compile](doc/compile.png)
 
@@ -19,8 +19,7 @@ tcc is part of the system. Write some C, compile it, run it, without leaving.
 	ush> /tmp/hello
 	hello from Bunix
 
-There is also `mei`, an editor that draws straight onto the console. Arrows,
-Home, End, Ctrl-S to save, Ctrl-X to save and quit.I tryed to keep it simple as i can for now. 
+`mei` is an editor that draws straight onto the console.I tryed to keep it simple as i can for now. 
 
 ![editor](doc/editor.png)
 
@@ -82,8 +81,7 @@ A word can be in quotes, so a name with a space in it stays one word:
 	ush> cat "/tmp/with space.txt"
 	a line
 
-A pipe is a file. The command on the left writes to `/dev/pipe0`, and the one
-on the right is given that file:
+Also a pipe is a file too. The command on the left writes to `/dev/pipe0`, and the one on the right is given that file:
 
 	ush> cat /tmp/list | sort
 	ush> cat /tmp/list | grep -n std | head -3
@@ -94,7 +92,7 @@ on the right is given that file:
 
 The two commands do not run at once — the left one finishes before the right
 one starts — but the file is real, and the commands that take a path work
-through it.
+through it. (Gone Improve It) 
 
 The filters take the small flags: `sort -n -r -u`, `grep -i -v -n -c`,
 `wc -l -w -c`, `comm -1 -2 -3`, `head -5`, `tail -n 5`, `cp -r`, `tr a-z A-Z`.
@@ -121,9 +119,6 @@ page:
 	  tutorial all  all five
 
 	man <command> says what one command does.
-
-A chapter is one idea, the commands that go with it, and lines to type.
-Chapter 4 is the one where the idea stops being a figure of speech:
 
 	ush> cat /proc/mem      the memory
 	ush> cat /proc/uptime   seconds since it started
