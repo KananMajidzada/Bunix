@@ -27,8 +27,9 @@ all: bunix.bin
 
 # The kernel is a freestanding Hare program. HAREPATH is pointed at the tree
 # itself so the build only sees our runtime and modules.
-bunix: user/blob.ha user/progs.ha user/progs.s user/hdrs.ha user/src.ha \
-       user/crt.ha user/libc.ha user/bootsec.ha user/wad.ha user/wad.s $(SRCS)
+bunix: build/doom1.wad user/blob.ha user/progs.ha user/progs.s user/hdrs.ha \
+	       user/src.ha user/crt.ha user/libc.ha user/bootsec.ha user/wad.ha \
+	       user/wad.s $(SRCS)
 	HAREPATH=. $(HARE) build -F -a$(ARCH) -o $@
 
 # QEMU's built-in Multiboot loader only accepts 32-bit ELF, so hand it a flat
@@ -264,7 +265,7 @@ user/wad.ha: build/doom1.wad
 	     "$$(wc -c < build/doom1.wad)" "$$(wc -c < build/doom1.wad)"; \
 	   printf '\treturn *(&h: *[]u8);\n};\n'; } > $@
 
-user/wad.s:
+user/wad.s: build/doom1.wad
 	@{ printf '.section .rodata\n.global user.wadbytes\nuser.wadbytes:\n.incbin "build/doom1.wad"\n'; } > $@
 
 # Fold the program images into the kernel: their bytes end to end in one blob,

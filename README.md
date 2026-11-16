@@ -194,7 +194,11 @@ The disk is a file, so a copy of it is a copy of everything on it.
 
 ![doom](doc/doom.png)
 
-DOOM runs on Bunix as a plain user-space program.Controls are keyboard only.
+DOOM runs on Bunix as a plain user-space program. The first build downloads the
+shareware data file into `build/doom1.wad` and embeds it in the kernel; this
+requires `curl` and an internet connection on the host. The downloaded file is
+reused on later builds unless `make clean` removes it. Controls are keyboard
+only.
 
 	ush> cd /Doom
 	ush> ls
