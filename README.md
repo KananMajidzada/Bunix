@@ -190,6 +190,13 @@ lives elsewhere, set `QEMU` in `config.mk`.
 Type `help` to see what the shell knows, and `tutorial` for a walk through
 the system, a page at a time. `man <command>` says what one command does.
 
+## When things break
+
+A bad address in a program is no big deal: that program is killed and the
+desktop carries on. If the kernel itself faults, there's nothing safe left to
+do, so it stops and shows a red panic screen — the reason and a register dump,
+on the display and on the serial line too. Reboot to get back.
+
 To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 
 	qemu-system-x86_64 -m 256 -kernel bunix.bin -serial stdio \

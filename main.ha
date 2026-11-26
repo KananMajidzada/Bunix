@@ -2,6 +2,7 @@ use architecture;
 use block;
 use boot;
 use console;
+use debug;
 use fb;
 use fs;
 use kit;
@@ -46,8 +47,7 @@ fn on_fault(regs: *architecture::registers) uintptr = {
 		console::println("killing user process");
 		return sched::fault_kill();
 	};
-	console::println("kernel fault, halting");
-	rt::halt();
+	debug::fault("kernel fault", regs);
 };
 
 // A terminal window is no use empty, so one opened from the menu gets its own
@@ -80,8 +80,7 @@ fn on_close_window(id: size) void = {
 
 export @symbol("main") fn main(mbi: uintptr) void = {
 	if (mbi == 0) {
-		console::println("bunix: no multiboot information");
-		rt::halt();
+		debug::panic("no multiboot information");
 	};
 
 	// A mark on the serial line with the information the kernel was
