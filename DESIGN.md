@@ -382,9 +382,9 @@ with `-r` and takes more than one file. `tr` holds ranges, as in `a-z`, and
 `split` takes the name the pieces are given.
 
 Done also: a panic screen. An unhandled kernel fault stops the machine and
-draws a red screen with the reason and a register dump, while the same words
-go out on the serial line. A fault in a user program is still just that
-program's problem, and is handled by killing it.
+draws a plain white screen with black text: the title and the reason, nothing
+else. The same few words go out on the serial line. A fault in a user program
+is still just that program's problem, and is handled by killing it.
 
 Done also: sound as a file. A Sound Blaster 16 is found and driven through
 `/dev/audio` and `/dev/audioctl`, with a ring buffer and interrupt-driven DMA

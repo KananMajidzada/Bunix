@@ -17,18 +17,14 @@ use sys;
 use syscall;
 
 fn on_fault(regs: *architecture::registers) uintptr = {
-	console::print("\nexception ");
-	console::printnum(regs.vector);
-	console::print(" error ");
-	console::printnum(regs.error);
-	console::print(" at ");
-	console::printnum(regs.rip);
-	console::print(" addr ");
-	console::printnum(architecture::fault_address());
-	console::putc('\n');
 	if ((regs.cs & 3) == 3) {
 		// A fault in user space is usually one address that was meant for
 		// something else, and the decimal form says nothing about which.
+		console::print("\nexception ");
+		console::printnum(regs.vector);
+		console::print(" at ");
+		console::printnum(regs.rip);
+		console::putc('\n');
 		console::print("  rip=");
 		console::printhex(regs.rip);
 		console::print(" rsp=");

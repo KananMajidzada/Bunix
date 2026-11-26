@@ -194,8 +194,9 @@ the system, a page at a time. `man <command>` says what one command does.
 
 A bad address in a program is no big deal: that program is killed and the
 desktop carries on. If the kernel itself faults, there's nothing safe left to
-do, so it stops and shows a red panic screen — the reason and a register dump,
-on the display and on the serial line too. Reboot to get back.
+do, so it stops. The screen goes white with a few black words: `BUNIX PANIC`
+and the reason. The same words go out on the serial line for anyone who isn't
+looking at the display. Reboot to get back.
 
 You can try it without breaking anything important:
 
@@ -205,7 +206,7 @@ shows the screen with a reason, and
 
 	ush> fault
 
-causes a real page fault so you get the full register dump. Both stop the
+causes a real page fault, so the reason reads `kernel fault`. Both stop the
 machine, so only run them when you're ready to reboot. Ordinary programs
 can't call these by accident: the kernel needs a magic word with the call.
 
