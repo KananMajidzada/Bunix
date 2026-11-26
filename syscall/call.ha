@@ -349,14 +349,16 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case PANIC =>
 		if (regs.rdi == PANIC_MAGIC) {
-			debug::panic("panic requested from the shell");
+			// Cause a real fault, so even a deliberate panic gets a
+			// real register dump rather than a made-up one.
+			debug::describe("Kernel Panic", "panic requested from the shell");
+			_ = architecture::probe(0x100000000);
 		};
 		regs.rax = 0;
 		return regs: uintptr;
 	case FAULT =>
 		if (regs.rdi == PANIC_MAGIC) {
-			// A real page fault, so the screen shows a real register
-			// dump rather than a made-up one.
+			debug::describe("Fault", "kernel fault");
 			_ = architecture::probe(0x100000000);
 		};
 		regs.rax = 0;

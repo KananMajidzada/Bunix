@@ -194,21 +194,23 @@ the system, a page at a time. `man <command>` says what one command does.
 
 A bad address in a program is no big deal: that program is killed and the
 desktop carries on. If the kernel itself faults, there's nothing safe left to
-do, so it stops. The screen goes white with a few black words: `BUNIX PANIC`
-and the reason. The same words go out on the serial line for anyone who isn't
-looking at the display. Reboot to get back.
+do, so it stops. The screen goes white and fills up with black text: a title,
+the reason, and the register dump — vector, error, cs, rflags, and every
+register down to `cr2`. The same lines go out on the serial port for anyone
+who isn't looking at the display. Reboot to get back.
 
 You can try it without breaking anything important:
 
 	ush> panic
 
-shows the screen with a reason, and
+shows `Kernel Panic` with a reason, and
 
 	ush> fault
 
-causes a real page fault, so the reason reads `kernel fault`. Both stop the
-machine, so only run them when you're ready to reboot. Ordinary programs
-can't call these by accident: the kernel needs a magic word with the call.
+shows `Fault` with `kernel fault` as the reason. Both cause a real fault so
+the register dump is real too. They stop the machine, so only run them when
+you're ready to reboot. Ordinary programs can't call these by accident: the
+kernel needs a magic word with the call.
 
 To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 

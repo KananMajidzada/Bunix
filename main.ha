@@ -43,7 +43,7 @@ fn on_fault(regs: *architecture::registers) uintptr = {
 		console::println("killing user process");
 		return sched::fault_kill();
 	};
-	debug::fault("kernel fault", regs);
+	debug::fault(regs);
 };
 
 // A terminal window is no use empty, so one opened from the menu gets its own
