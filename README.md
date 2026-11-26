@@ -199,35 +199,45 @@ The disk is a file, so a copy of it is a copy of everything on it.
 
 ## Sound
 
-Sound is a file, like the screen and the keyboard. `cat /proc/audio` says what
-card was found; `/dev/audioctl` holds the format as `rate channels bits volume`;
-writing PCM to `/dev/audio` plays it. `tone` is a small example, and `vol` says
-or sets the volume of the whole machine from 0 to 100:
+Bunix has sound now. The card is just a file, like the screen and the
+keyboard: write PCM to `/dev/audio` and it plays, read `/dev/audioctl` to see
+the format, write to it to change things, and `cat /proc/audio` to find out
+what hardware was found. There's no special sound syscall and nothing extra
+to link — if your program can write a file, it can make a noise.
+
+Have a listen:
 
 	ush> cat /proc/audio
 	sb16 base 544 irq 5 dma 1 5 blocks 0 irqs 0 queued 0 volume 100
-	ush> vol 50
-	volume 50
 	ush> tone
 	tone: played 440 Hz for a second
 
-The volume is a setting of the machine, not of one program: it is applied in
-the kernel on the way to the card, so it works for every program that writes
-`/dev/audio`, and it stays when the format or the tune changes.
+`tone` is a tiny program that writes a sine wave to `/dev/audio`. `vol` is the
+volume knob for the whole machine:
 
-The kernel drives a Sound Blaster 16 through ISA DMA and an interrupt, and a
-program needs no sound-specific system call: the helpers in `dev.h` are just
-the ordinary read and write calls. Any port that uses them gets sound in the
-same way. `make run` passes QEMU the flags to create the card and connect it
-to PulseAudio:
+	ush> vol
+	volume 100
+	ush> vol 40
+	volume 40
 
-	/usr/bin/qemu-system-x86_64 -m 256 -kernel bunix.bin -display gtk -serial stdio \
-		-audiodev pa,id=snd0 \
-		-device sb16,audiodev=snd0 -M pcspk-audiodev=snd0
+`vol 0` mutes everything and `vol 100` is full blast. It belongs to the
+machine, not to one song, so it stays where you put it when the format changes
+or another program starts playing. The kernel turns samples down on their way
+to the card, which means it works for every program that writes to the audio
+file — Doom included.
 
-`make run-wav` records what the card plays in `/tmp/bunix.wav` instead, which
-is handy for checking sound without listening to it. Without a card, the files
-simply answer with nothing and the machine is quiet.
+Under the hood there's a Sound Blaster 16, driven with ISA DMA and an
+interrupt so the sound keeps going between writes. `/dev/audioctl` keeps its
+settings on one short line, `rate channels bits volume`; writing `stop` there
+shuts the card up. Everything a port needs is in `dev.h` as ordinary read and
+write helpers, so the next game you add gets sound without inventing its own
+way of talking to the hardware.
+
+`make run` gives QEMU a sound card and hooks it up to your speakers
+(PulseAudio). If you'd rather look at the bytes than listen to them,
+`make run-wav` records what the card plays into `/tmp/bunix.wav`. And if the
+machine has no card at all, the sound files simply answer with nothing while
+everything else carries on as usual.
 
 ## DOOM
 
@@ -248,11 +258,11 @@ only.
 `/dev/win`, the keys arrive on `/dev/kbd`, the framebuffer it draws on is
 `/dev/fb`, and the sound effects are written to `/dev/audio` — DOOM is just a
 program reading and writing files. The game mixes its own samples against the
-clock it runs on, so a shot is heard when it happens. Music is quiet for now:
-those lumps are MIDI for an OPL chip, not samples. Quitting from the game's
-menu ends the process and hands the prompt back to `ush>`. Deleting the game's
-window from the desktop menu ends it too, so nothing is left playing or
-stealing time in the background.
+clock it runs on, so a shot is heard when it happens. Music is still quiet,
+sorry: those lumps are MIDI for an OPL chip, not samples. When you quit from
+the game's menu the process really ends and you get your `ush>` back; deleting
+the game's window from the desktop menu does the same, so nothing is left
+playing or eating CPU in the background.
 
 Controls, keyboard only:
 
