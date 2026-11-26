@@ -1,5 +1,5 @@
 use architecture;
-use kit;
+use wm;
 use rt;
 
 let lastbtn: u8 = 0;
@@ -18,31 +18,24 @@ let in_poll = false;
 export fn putc(ch: u8) void = {
 	serial_putc(ch);
 	vga_putc(ch);
-	kit::putc(ch);
+	wm::putc(ch, wm::out_target());
 };
 
 // The size of the console, so a program can lay itself out to fit. With the
 // window manager running that is the terminal window a program draws into;
 // without it there is only the text console to measure.
 export fn screen_rows() size = {
-	const r = kit::screen_rows();
-	if (r != 0) {
-		return r;
-	};
 	return vga_rows();
 };
 
 export fn screen_cols() size = {
-	const c = kit::screen_cols();
-	if (c != 0) {
-		return c;
-	};
 	return vga_cols();
 };
 
 // Draws whatever has been written to the screen since the last frame.
 export fn sync() void = {
-	kit::sync();
+	// The window manager now draws on its own schedule.
+	void;
 };
 
 // Vector 33 is the keyboard. Taking its scancode here, rather than when a
@@ -122,7 +115,6 @@ export fn printnum(n: u64) void = {
 
 export fn getch() u8 = {
 	for (true) {
-		poll_mouse();
 		if (serial_has_data()) {
 			return serial_getc();
 		};
@@ -151,22 +143,18 @@ export fn poll_mouse() void = {
 	const dx = mouse_dx();
 	const dy = mouse_dy();
 	const b = mouse_buttons();
+	// Pointer edges belong to the window manager, which reads them from
+	// /dev/mouse. Every edge is put in that queue now; the manager decides
+	// whether it is a menu click, a drag, or a button for a drawing program.
 	if (dx != 0 || dy != 0 || b != lastbtn) {
-		const to = kit::mouse(dx, dy, b);
-		if (to.app) {
-			// The pointer was on a drawing program's picture, so its window
-			// gets the movement and the buttons through /dev/mouse.
-			mouse_note(to.dx, to.dy, b);
-		};
+		mouse_note(dx, dy, b);
 		lastbtn = b;
 	};
-	kit::sync();
 	in_poll = false;
 };
 
 // Returns one byte, or zero when nothing is waiting.
 export fn pollch() u8 = {
-	poll_mouse();
 	if (serial_has_data()) {
 		return serial_getc();
 	};

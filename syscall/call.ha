@@ -2,7 +2,7 @@ use architecture;
 use console;
 use debug;
 use fs;
-use kit;
+use wm;
 use loader;
 use rt;
 use sched;
@@ -294,7 +294,6 @@ fn handle(regs: *architecture::registers) uintptr = {
 		regs.rax = sched::deliver(console::pollch()): u64;
 		return regs: uintptr;
 	case YIELD =>
-		console::poll_mouse();
 		regs.rax = 0;
 		return sched::tick(regs);
 	case CREATE =>
@@ -327,7 +326,7 @@ fn handle(regs: *architecture::registers) uintptr = {
 		regs.rax = if (sched::alive(regs.rdi: size)) 1 else 0;
 		return regs: uintptr;
 	case FRESH =>
-		regs.rax = if (kit::take_fresh()) 1 else 0;
+		regs.rax = if (wm::take_fresh()) 1 else 0;
 		return regs: uintptr;
 	case CHDIR =>
 		regs.rax = changepath(regs);

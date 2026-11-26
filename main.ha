@@ -5,7 +5,6 @@ use console;
 use debug;
 use fb;
 use fs;
-use kit;
 use loader;
 use mem;
 use paging;
@@ -46,32 +45,12 @@ fn on_fault(regs: *architecture::registers) uintptr = {
 	debug::fault(regs);
 };
 
-// A terminal window is no use empty, so one opened from the menu gets its own
-// shell rather than a second prompt appearing in the window it was opened over.
-fn on_new_win(wi: size) void = {
-	// The window is named before the shell starts, because the shell prints
-	// its banner as soon as it runs. The shell is started sharing the
-	// filesystem rather than with a namespace of its own, so that a file
-	// written in one terminal is visible from another: separate terminals,
-	// one machine.
-	sched::set_spawn_win(wi);
-	const id = loader::run("/sh");
-	sched::bind_shell(id, wi);
-};
-
 // An interrupt may be the keyboard's, the card's, or one of the things
 // added later. Each module looks at the line and ignores the ones that are
 // not its own.
 fn on_irq(vec: u64) void = {
 	console::irq(vec);
 	sound::audio_irq(vec);
-};
-
-// Closing a program's drawing window closes the program. The game's own menu
-// is the gentle way out; this is what happens when the window is deleted from
-// the desktop's menu, and it leaves nothing playing behind it.
-fn on_close_window(id: size) void = {
-	_ = sched::kill(id);
 };
 
 export @symbol("main") fn main(mbi: uintptr) void = {
@@ -97,9 +76,6 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	if (!fb::active()) {
 		fb::vbe();
 	};
-	kit::new_win_hook = &on_new_win;
-	kit::close_hook = &on_close_window;
-	kit::begin();
 
 	if (fb::active()) {
 		console::print("video:     ");
@@ -174,6 +150,9 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	architecture::sched_hook = &sched::tick;
 	architecture::sti();
 
+	// The window manager is a program too. It takes over the screen before
+	// the shell starts writing into its first terminal.
+	_ = loader::run("/wm");
 	const init_id = loader::run("/sh");
 	sched::bind_shell(init_id, 0);
 	console::println("");

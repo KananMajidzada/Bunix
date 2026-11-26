@@ -1,6 +1,4 @@
-use architecture;
 use fb;
-use mem;
 use rt;
 
 // kit: the window manager the machine boots into. A plain desktop holds
@@ -156,7 +154,20 @@ export fn set_out_win(wi: size) void = {
 // for words, so a program drawing into one still has its own output go to the
 // terminal it started in; when that terminal is gone the words are dropped
 // rather than left lying about the picture.
+let feedwin: size = NONE;
+
+// A byte forwarded from the kernel's terminal stream lands in the window
+// the kernel says it was written to, not in whichever one has the focus.
+export fn feed(wi: size, ch: u8) void = {
+	feedwin = wi;
+	putc(ch);
+	feedwin = NONE;
+};
+
 export fn out_target() size = {
+	if (feedwin != NONE) {
+		return feedwin;
+	};
 	let wi = if (out_win != NONE && out_win < MAXWIN && wins[out_win].used) {
 		yield out_win;
 	} else {
@@ -319,10 +330,6 @@ fn glayout(wi: size) void = {
 // Hands back the frames a picture was held in.
 fn gfree(wi: size) void = {
 	const p = wins[wi].gbuf;
-	const n = wins[wi].gpages;
-	for (let i = 0z; i < n; i += 1) {
-		mem::release(p + ((i * 4096): uintptr));
-	};
 	wins[wi].gbuf = 0;
 	wins[wi].gpages = 0;
 	wins[wi].gw = 0;
@@ -337,7 +344,7 @@ fn galloc(wi: size, w: size, h: size) bool = {
 		return false;
 	};
 	const pages = (w * h * 4 + 4095) / 4096;
-	const p = mem::frames_alloc(pages: u64);
+	const p = rt::page_alloc(pages: u64);
 	if (p == 0) {
 		return false;
 	};
@@ -453,7 +460,7 @@ export fn draw_frame(wi: size, data: []u8, off: u64) size = {
 		if (room > n - (src: u64)) {
 			room = n - (src: u64);
 		};
-		architecture::memcpy(dst, (&data[src]: uintptr), room: size);
+		rt::memcpy(dst: *opaque, (&data[src]: uintptr): *opaque, room: size);
 		src += room: size;
 		p += room / 4;
 	};
@@ -489,7 +496,7 @@ export fn read_frame(wi: size, buf: []u8, off: u64, n: size) size = {
 		if (room > got - (dst: u64)) {
 			room = got - (dst: u64);
 		};
-		architecture::memcpy((&buf[dst]: uintptr), src, room: size);
+		rt::memcpy((&buf[dst]: uintptr): *opaque, src: *opaque, room: size);
 		dst += room: size;
 		p += room / 4;
 	};
@@ -1326,7 +1333,7 @@ fn menu_activate(sel: int) void = {
 	} else if (sel == 4) {
 		hide_window(wi);
 	} else if (sel == 5) {
-		rt::halt();
+		rt::haltsys();
 	};
 };
 

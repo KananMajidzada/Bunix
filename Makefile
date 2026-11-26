@@ -9,7 +9,7 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c fbtest tone tcc mei doom \
+PROGS = hello wc grep cp cc test_c fbtest tone wm tcc mei doom \
 	ls sort uniq head tail tr rev seq expr basename dirname \
 	stat du df test find tree \
 	mv nl cut paste comm diff od strings cksum file uname id split \

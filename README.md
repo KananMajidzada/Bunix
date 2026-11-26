@@ -5,7 +5,8 @@ editor, and both of them run inside Bunix kernel/os.
 
 ![boot](doc/boot.png)
 
-It boots into a small window manager Kit.
+It boots into a small window manager called `/wm`, which is a user program
+just like the shell, not a piece of the kernel.
 
 ![windows](doc/windows.png)
 

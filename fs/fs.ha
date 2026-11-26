@@ -2,7 +2,7 @@ use architecture;
 use block;
 use console;
 use fb;
-use kit;
+use wm;
 use mem;
 use paging;
 use rt;
@@ -424,7 +424,7 @@ fn gen_millis(buf: []u8) size = {
 fn gen_fbgeom(buf: []u8) size = {
 	let w: size = 0;
 	let h: size = 0;
-	kit::gfx_dims(&w, &h);
+	wm::dims(&w, &h);
 	if (w == 0 || h == 0) {
 		fb::dev_dims(&w, &h);
 	};
@@ -598,6 +598,10 @@ fn kbd_read(buf: []u8, off: u64, n: size) size = {
 // pointer has not moved: a game polls this between frames.
 fn mouse_read(buf: []u8, off: u64, n: size) size = {
 	_ = off;
+	// Reading the file is what polls the PS/2 device now that the window
+	// manager, rather than the scheduler, is the one looking at pointer
+	// events.
+	console::poll_mouse();
 	let got = 0z;
 	for (got + 8 <= n) {
 		let e = 0u64;
@@ -617,23 +621,17 @@ fn mouse_read(buf: []u8, off: u64, n: size) size = {
 // with no window, such as a test that fills the display with a pattern, still
 // writes at the screen itself.
 fn fb_write(data: []u8, off: u64) size = {
-	const wi = kit::gfx_window();
-	if (wi != NOWIN) {
-		return kit::draw_frame(wi, data, off);
-	};
 	if (sched::is_gfx(sched::current_id())) {
-		// The window this thread draws into is gone. Its picture has nowhere
-		// to go, and the screen is not the desktop's to take over.
+		const wi = sched::current_win();
+		if (wi != NOWIN) {
+			return wm::frame_write(wi, off, data);
+		};
 		return 0;
 	};
 	return fb::dev_write(data, off);
 };
 
 fn fb_read(buf: []u8, off: u64, n: size) size = {
-	const wi = kit::gfx_window();
-	if (wi != NOWIN) {
-		return kit::read_frame(wi, buf, off, n);
-	};
 	return fb::dev_read(buf, off, n);
 };
 
@@ -651,7 +649,7 @@ fn win_read(buf: []u8, off: u64, n: size) size = {
 	};
 	let w = 0z;
 	let h = 0z;
-	kit::gfx_dims(&w, &h);
+	wm::dims(&w, &h);
 	let k = put_num(buf, w: u64);
 	buf[k] = ' ': u8;
 	k += 1;
@@ -670,14 +668,65 @@ fn win_write(data: []u8, off: u64) size = {
 	// the pointer, while its own output carries on going to the terminal it
 	// was started in.
 	const id = sched::current_id();
-	const from = kit::out_target();
-	const wi = kit::claim_gfx(data, id, from);
+	const from = wm::out_target();
+	let name = len(data);
+	if (name > 32) {
+		name = 32;
+	};
+	let req: [40]u8 = [0...];
+	req[0] = name: u8;
+	for (let i = 0z; i < name; i += 1) {
+		req[1 + i] = data[i];
+	};
+	req[1 + name] = id: u8;
+	req[2 + name] = from: u8;
+	wm::req_write(req[..3 + name], 0);
+
+	// The manager is another process, so let the clock run while it draws
+	// the window and answers with its size.
+	architecture::sti();
+	for (!wm::answered()) {
+		architecture::pause();
+	};
+	architecture::cli();
+	const wi = wm::reply_window();
 	if (wi == NOWIN) {
 		return 0;
 	};
-	kit::set_out_win(wi);
+	wm::set_out(wi);
 	sched::bind_win(id, wi);
 	sched::set_gfx(id, true);
+	return len(data);
+};
+
+fn wm_focus_write(data: []u8, off: u64) size = {
+	_ = off;
+	if (len(data) < 1) {
+		return 0;
+	};
+	wm::set_focus(data[0]: size);
+	return len(data);
+};
+
+fn wm_fresh_write(data: []u8, off: u64) size = {
+	_ = data;
+	_ = off;
+	wm::set_fresh();
+	return 1;
+};
+
+fn wm_dims_write(data: []u8, off: u64) size = {
+	_ = off;
+	if (len(data) < 16) {
+		return 0;
+	};
+	let w = 0u64;
+	let h = 0u64;
+	for (let i = 0z; i < 8; i += 1) {
+		w |= (data[i]: u64) << ((i * 8): u64);
+		h |= (data[8 + i]: u64) << ((i * 8): u64);
+	};
+	wm::set_dims(w: size, h: size);
 	return len(data);
 };
 
@@ -1094,6 +1143,41 @@ export fn init() void = {
 	nodes[winfile].gdsk = &win_read;
 	nodes[winfile].wdsk = &win_write;
 	link(dev, winfile);
+
+	// The window manager is a program now. These are the files it uses to
+	// hear terminal output, take frames from drawing programs, answer window
+	// requests, and tell the kernel where the pointer's keys should go.
+	const wmout = mknode("wmout", false);
+	nodes[wmout].gdsk = &wm::out_read;
+	link(dev, wmout);
+
+	const wmframe = mknode("wmframe", false);
+	nodes[wmframe].gdsk = &wm::frame_read;
+	link(dev, wmframe);
+
+	const wmreq = mknode("wmreq", false);
+	nodes[wmreq].gdsk = &wm::req_read;
+	link(dev, wmreq);
+
+	const wmreply = mknode("wmreply", false);
+	nodes[wmreply].wdsk = &wm::reply_write;
+	link(dev, wmreply);
+
+	const wmfocus = mknode("wmfocus", false);
+	nodes[wmfocus].wdsk = &wm_focus_write;
+	link(dev, wmfocus);
+
+	const wmdims = mknode("wmdims", false);
+	nodes[wmdims].wdsk = &wm_dims_write;
+	link(dev, wmdims);
+
+	const wmfresh = mknode("wmfresh", false);
+	nodes[wmfresh].wdsk = &wm_fresh_write;
+	link(dev, wmfresh);
+
+	const wmbind = mknode("wmbind", false);
+	nodes[wmbind].wdsk = &wm::bind_shell;
+	link(dev, wmbind);
 
 	// The speaker as a file: a write is a tune and does not come back
 	// until the tune is over. It is the device a program makes music

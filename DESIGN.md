@@ -144,16 +144,23 @@ once, so packet assembly runs with interrupts held, and a guard serialises the
 redraw that follows. The yield path polls as well, so the pointer keeps moving
 while a spawned program runs.
 
-`kit` is a small rio-style window manager over the frame buffer: a stack of
+`/wm` is a small rio-style window manager over the frame buffer: a stack of
 overlapping terminals, each with a title bar, a border, and a scrollbar. The
 middle and right buttons raise a pop-up menu holding `new`, `resize`, `move`,
 `delete`, `hide`, and `exit`; the left button selects text in a window, drags
 the window by its title, or grabs a border once the pointer rests against it
 and the frame turns black. Console output goes to whatever window has focus.
-Opening a window marks it fresh, and the shell prints a prompt into it, so a new
-terminal is ready to type in. Like the text console, it lives in the kernel for
-now; the plan is for a window system to become one more file server a process
-can mount.
+Opening a window makes a fresh shell for it, so a new terminal is ready to type
+in.
+
+The window manager is a user program. It reads the screen's size from
+`/proc/fb`, pixels from `/dev/fb`, pointer edges from `/dev/mouse`, and terminal
+bytes from `/dev/wmout`; it answers window requests through `/dev/wmreq` and
+`/dev/wmreply`, and tells the kernel about focus and sizes through
+`/dev/wmfocus` and `/dev/wmdims`. The kernel keeps only the little it needs for
+routing input and holding the last frame a drawing program sent. There is no
+drawing code or desktop policy left in the kernel - the window system became
+one more file-serving process, as planned.
 
 ## Audio
 

@@ -1,5 +1,5 @@
 use architecture;
-use kit;
+use wm;
 use mem;
 use paging;
 
@@ -112,7 +112,6 @@ fn cleanup(id: size) void = {
 	free_user(id);
 	// A drawing window made for this thread has nothing left to draw into it,
 	// so it goes the way the thread does.
-	kit::release_owner(id);
 	gfxof[id] = false;
 	reap(threads[id].id: size);
 };
@@ -220,7 +219,7 @@ export fn set_spawn_win(wi: size) void = {
 };
 
 fn input_thread() size = {
-	const wi = kit::focus_win();
+	const wi = wm::focus_win();
 	if (wi < MAXWIN) {
 		const fg = win_fg[wi];
 		if (fg != MAXWIN && fg < MAXTHREADS && threads[fg].alive
@@ -425,6 +424,8 @@ export fn live() size = {
 
 export fn running() u64 = threads[current].id;
 
+export fn current_win() size = threads[current].win;
+
 export fn alive(id: size) bool = id < nthreads && threads[id].alive;
 
 export fn retire() void = {
@@ -598,7 +599,7 @@ fn pick_next() uintptr = {
 	};
 	current = next;
 	// Output follows the running thread into its own window.
-	kit::set_out_win(threads[current].win);
+	wm::set_out(threads[current].win);
 	if (fpuready[current]) {
 		architecture::fpu_load(threads[current].fpu);
 	};
