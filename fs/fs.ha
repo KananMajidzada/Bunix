@@ -631,6 +631,10 @@ fn fb_write(data: []u8, off: u64) size = {
 	return fb::dev_write(data, off);
 };
 
+fn fb_present_write(data: []u8, off: u64) size = {
+	return fb::dev_present(data, off);
+};
+
 fn fb_read(buf: []u8, off: u64, n: size) size = {
 	return fb::dev_read(buf, off, n);
 };
@@ -1123,6 +1127,10 @@ export fn init() void = {
 	nodes[fbdev].gdsk = &fb_read;
 	nodes[fbdev].wdsk = &fb_write;
 	link(dev, fbdev);
+
+	const fbshow = mknode("fbpresent", false);
+	nodes[fbshow].wdsk = &fb_present_write;
+	link(dev, fbshow);
 
 	// The keyboard as a file: key edges, make and break, for a program that
 	// holds several keys at once.

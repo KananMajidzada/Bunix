@@ -333,3 +333,17 @@ export fn move_rect(x: size, y: size, w: size, h: size, dx: int, dy: int) void =
 		};
 	};
 };
+// A window manager's own pixels are already in its shadow. Writing them
+// through this file puts them straight on the card without copying them
+// into the kernel's shadow first, which halves the work of every frame.
+export fn dev_present(data: []u8, off: u64) size = {
+	if (real == 0 || off >= (pitch * fbh): u64 || len(data) == 0) {
+		return 0;
+	};
+	let n = (len(data): u64);
+	if (off + n > (pitch * fbh): u64) {
+		n = (pitch * fbh): u64 - off;
+	};
+	architecture::memcpy(real + (off: uintptr), (&data[0]: uintptr), n: size);
+	return n: size;
+};

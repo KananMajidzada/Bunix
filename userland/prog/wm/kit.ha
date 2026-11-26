@@ -885,6 +885,15 @@ fn blank(wi: size) void = {
 	};
 };
 
+let need_repaint = false;
+
+export fn flush() void = {
+	if (need_repaint) {
+		need_repaint = false;
+		repaint();
+	};
+};
+
 // Set by the kernel. A terminal window is no use without something running in
 // it, so making one asks for a shell to be started there.
 export let new_win_hook: nullable *fn(wi: size) void = null;
@@ -1460,7 +1469,15 @@ export fn mouse(dx: int, dy: int, btn: u8) route = {
 	};
 
 	lastbtn = btn;
-	repaint();
+	// A drag can deliver many edges in one slice. Painting the whole
+	// desktop for each one would copy megabytes per event, so just mark it
+	// and let the caller flush once after the queue is empty.
+	// Motion over a drawing program's picture changes only the pointer,
+	// which that program's next frame puts back. The desktop itself did not
+	// change, so there is no reason to repaint the whole screen.
+	if (!app) {
+		need_repaint = true;
+	};
 	return route { app = app, dx = mdx, dy = mdy };
 };
 

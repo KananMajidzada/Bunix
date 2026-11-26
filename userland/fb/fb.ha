@@ -76,9 +76,16 @@ export fn fill(x: size, y: size, w: size, h: size, c: u32) void = {
 	if (y + hh > fbh) {
 		hh = fbh - y;
 	};
+	const pair = ((c: u64) << 32) | (c: u64);
 	for (let j = 0z; j < hh; j += 1) {
-		for (let i = 0z; i < ww; i += 1) {
-			px(x + i, y + j, c);
+		const row = shadow + ((y + j) * pitch + x * 4): uintptr;
+		let i = 0z;
+		for (i + 1 < ww) {
+			*((row + (i * 4): uintptr): *u64) = pair;
+			i += 2;
+		};
+		if (i < ww) {
+			*((row + (i * 4): uintptr): *u32) = c;
 		};
 	};
 };
@@ -145,7 +152,7 @@ export fn present() void = {
 	if (shadow == 0) {
 		return;
 	};
-	_ = rt::writeat("/dev/fb", bytes(shadow, pitch * fbh), 0);
+	_ = rt::writeat("/dev/fbpresent", bytes(shadow, pitch * fbh), 0);
 };
 
 export fn present_rect(x: size, y: size, w: size, h: size) void = {
@@ -162,6 +169,6 @@ export fn present_rect(x: size, y: size, w: size, h: size) void = {
 	};
 	for (let j = 0z; j < hh; j += 1) {
 		const at = (y + j) * pitch + x * 4;
-		_ = rt::writeat("/dev/fb", bytes(shadow + at, ww * 4), at: u64);
+		_ = rt::writeat("/dev/fbpresent", bytes(shadow + at, ww * 4), at: u64);
 	};
 };

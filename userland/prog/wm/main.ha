@@ -42,21 +42,29 @@ fn get64(b: []u8, at: size) u64 = {
 	return v;
 };
 
-fn terminal() void = {
-	let b: [512]u8 = [0...];
-	const n = rt::readfile("/dev/wmout", b[..]);
-	let i = 0z;
-	for (i + 1 < n) {
-		feed(b[i]: size, b[i + 1]);
-		i += 2;
+fn terminal() bool = {
+	let did = false;
+	for (let pass = 0z; pass < 16; pass += 1) {
+		let b: [512]u8 = [0...];
+		const n = rt::readfile("/dev/wmout", b[..]);
+		if (n == 0) {
+			break;
+		};
+		did = true;
+		let i = 0z;
+		for (i + 1 < n) {
+			feed(b[i]: size, b[i + 1]);
+			i += 2;
+		};
 	};
+	return did;
 };
 
-fn requests() void = {
+fn requests() bool = {
 	let b: [64]u8 = [0...];
 	const n = rt::readfile("/dev/wmreq", b[..]);
 	if (n < 3) {
-		return;
+		return false;
 	};
 	const name = b[1..1 + (b[0]: size)];
 	const id = b[1 + (b[0]: size)]: size;
@@ -71,31 +79,33 @@ fn requests() void = {
 	put64(reply[..], 8, w: u64);
 	put64(reply[..], 16, h: u64);
 	_ = rt::writefile("/dev/wmreply", reply[..]);
+	return true;
 };
 
 let lastframe = 0u64;
 
-fn frames(scratch: uintptr) void = {
+fn frames(scratch: uintptr) bool = {
 	let hdr: [32]u8 = [0...];
 	const n = rt::readat("/dev/wmframe", 0, hdr[..]);
 	if (n < 32) {
-		return;
+		return false;
 	};
 	const seq = get64(hdr[..], 24);
 	if (seq == lastframe) {
-		return;
+		return false;
 	};
 	lastframe = seq;
 	const wi = get64(hdr[..], 0): size;
 	const off = get64(hdr[..], 8);
 	const count = get64(hdr[..], 16): size;
 	if (wi == NONE || count == 0 || count > 640 * 400 * 4) {
-		return;
+		return false;
 	};
 	const got = rt::readat("/dev/wmframe", 32, bytes(scratch, count));
 	if (got > 0) {
 		draw_frame(wi, bytes(scratch, got), off);
 	};
+	return true;
 };
 
 // A new terminal window needs a shell of its own. The kernel binds it to
@@ -156,17 +166,33 @@ export @symbol("main") fn main() void = {
 		return;
 	};
 	let ev: [8]u8 = [0...];
+	let busy = 0z;
 	for (true) {
-		terminal();
-		requests();
-		frames(scratch);
-		const n = rt::readfile("/dev/mouse", ev[..]);
-		if (n == 8) {
+		let work = terminal();
+		if (requests()) {
+			work = true;
+		};
+		if (frames(scratch)) {
+			work = true;
+		};
+		// Drain every pointer edge that arrived, not just one per tick.
+		for (let pass = 0z; pass < 32; pass += 1) {
+			const n = rt::readfile("/dev/mouse", ev[..]);
+			if (n != 8) {
+				break;
+			};
 			const e = *(&ev: *mouseev);
 			_ = mouse(e.dx: int, e.dy: int, e.btn);
+			work = true;
 		};
 		report_state();
+		flush();
 		sync();
-		rt::cop();
+		if (work && busy < 8) {
+			busy += 1;
+		} else {
+			busy = 0;
+			rt::cop();
+		};
 	};
 };
