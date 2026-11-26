@@ -1,5 +1,6 @@
 use architecture;
 use console;
+use debug;
 use fs;
 use kit;
 use loader;
@@ -31,6 +32,12 @@ export def KILL: u64 = 21;
 export def READAT: u64 = 22;
 export def WRITEAT: u64 = 23;
 export def REDIRECT: u64 = 24;
+export def PANIC: u64 = 25;
+export def FAULT: u64 = 26;
+
+// A program cannot stop the machine by accident. The two diagnostic calls
+// need a word in the register as well as the call number.
+def PANIC_MAGIC: u64 = 0x42554E49;
 
 type raw = struct {
 	data: *[*]u8,
@@ -339,6 +346,20 @@ fn handle(regs: *architecture::registers) uintptr = {
 		return regs: uintptr;
 	case WRITEAT =>
 		regs.rax = writeat(regs);
+		return regs: uintptr;
+	case PANIC =>
+		if (regs.rdi == PANIC_MAGIC) {
+			debug::panic("panic requested from the shell");
+		};
+		regs.rax = 0;
+		return regs: uintptr;
+	case FAULT =>
+		if (regs.rdi == PANIC_MAGIC) {
+			// A real page fault, so the screen shows a real register
+			// dump rather than a made-up one.
+			_ = architecture::probe(0x100000000);
+		};
+		regs.rax = 0;
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

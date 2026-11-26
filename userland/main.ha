@@ -76,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [76]entry = [
+const MANUAL: [78]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -106,6 +106,8 @@ const MANUAL: [76]entry = [
 	entry { name = "user", help = "start a program of its own", builtin = true , paths = false },
 	entry { name = "multi", help = "start three programs at once", builtin = true , paths = false },
 	entry { name = "version", help = "say what this is", builtin = true , paths = false },
+	entry { name = "panic", help = "show the panic screen on purpose", builtin = true , paths = false },
+	entry { name = "fault", help = "force a fault into the panic screen", builtin = true , paths = false },
 	entry { name = "help", help = "say what can be done", builtin = true , paths = false },
 	entry { name = "tutorial", help = "a walk through the system", builtin = true , paths = false },
 	entry { name = "exit", help = "leave the shell", builtin = true , paths = false },
@@ -551,6 +553,12 @@ fn run_command(line: []u8) bool = {
 	} else if (str_eq(cmd, "version")) {
 		const vp: str = "/proc/version";
 		run_cat(*(&vp: *[]u8));
+	} else if (str_eq(cmd, "panic")) {
+		rt::println("showing the panic screen; reboot after this");
+		_ = rt::test_panic();
+	} else if (str_eq(cmd, "fault")) {
+		rt::println("forcing a kernel fault; reboot after this");
+		_ = rt::test_fault();
 	} else if (str_eq(cmd, "echo")) {
 		// The spaces at the end are not part of what is said, which
 		// matters when the line was cut where a > began.

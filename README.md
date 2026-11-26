@@ -197,6 +197,18 @@ desktop carries on. If the kernel itself faults, there's nothing safe left to
 do, so it stops and shows a red panic screen — the reason and a register dump,
 on the display and on the serial line too. Reboot to get back.
 
+You can try it without breaking anything important:
+
+	ush> panic
+
+shows the screen with a reason, and
+
+	ush> fault
+
+causes a real page fault so you get the full register dump. Both stop the
+machine, so only run them when you're ready to reboot. Ordinary programs
+can't call these by accident: the kernel needs a magic word with the call.
+
 To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 
 	qemu-system-x86_64 -m 256 -kernel bunix.bin -serial stdio \

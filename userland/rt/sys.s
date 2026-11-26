@@ -150,6 +150,18 @@ rt.sys_redirect:
 	int $0x80
 	ret
 
+.global rt.sys_panic
+rt.sys_panic:
+	movq $25, %rax
+	int $0x80
+	ret
+
+.global rt.sys_fault
+rt.sys_fault:
+	movq $26, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

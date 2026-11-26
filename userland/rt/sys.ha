@@ -44,6 +44,16 @@ type shdr = struct {
 	dlen: size,
 ) u64;
 @symbol("rt.sys_redirect") fn sys_redirect(pptr: uintptr, plen: size, mode: u64) u64;
+@symbol("rt.sys_panic") fn sys_panic(magic: u64) u64;
+@symbol("rt.sys_fault") fn sys_fault(magic: u64) u64;
+
+// The two ways to try the panic screen, for when you want to see it. A wrong
+// word is ignored by the kernel, so a program cannot stop the machine by a
+// stray call.
+def PANIC_MAGIC: u64 = 0x42554E49;
+
+export fn test_panic() u64 = sys_panic(PANIC_MAGIC);
+export fn test_fault() u64 = sys_fault(PANIC_MAGIC);
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 

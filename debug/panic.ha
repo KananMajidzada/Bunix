@@ -100,10 +100,10 @@ fn show(reason: str, regs: nullable *architecture::registers) never = {
 	say("");
 	say("****************************************");
 	say("BUNIX PANIC");
-	say(reason);
 
 	if (!fb::active()) {
 		say("no framebuffer; the machine is stopped");
+		say(reason);
 		rt::halt();
 	};
 

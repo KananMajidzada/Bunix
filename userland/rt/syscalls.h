@@ -41,6 +41,10 @@ typedef long ssize_t;
 #define SYS_READAT      22
 #define SYS_WRITEAT     23
 #define SYS_REDIRECT    24
+#define SYS_PANIC       25
+#define SYS_FAULT       26
+
+#define BUNIX_PANIC_MAGIC 0x42554E49u
 
 static inline uint64_t syscall0(uint64_t n) {
     uint64_t ret;
@@ -138,6 +142,16 @@ static inline ssize_t bunix_writeat(const char *path, uint64_t off,
 static inline int bunix_redirect(const char *path, int mode) {
     uint64_t n = path_len(path);
     return (int)syscall3(SYS_REDIRECT, (uint64_t)path, n, (uint64_t)mode);
+}
+
+// Diagnostic calls: show the panic screen, or force a real fault into it.
+// Both need the magic word, so an ordinary program cannot stop the machine.
+static inline void bunix_panic(void) {
+    syscall1(SYS_PANIC, BUNIX_PANIC_MAGIC);
+}
+
+static inline void bunix_fault(void) {
+    syscall1(SYS_FAULT, BUNIX_PANIC_MAGIC);
 }
 
 // Size and type of a path without reading it: mode 1 means a directory.
