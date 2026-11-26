@@ -20,6 +20,7 @@ let outcount: size = 0;
 
 let frame: [FRAME]u8 = [0...];
 let framed: size = 0;
+let frameseq: u64 = 0;
 let framewin: size = 0;
 let frameoff: u64 = 0;
 
@@ -80,6 +81,7 @@ export fn frame_write(wi: size, off: u64, data: []u8) size = {
 	framewin = wi;
 	frameoff = off;
 	framed = n;
+	frameseq += 1;
 	return n;
 };
 
@@ -97,25 +99,26 @@ fn get64(buf: []u8, at: size) u64 = {
 	return v;
 };
 
-// /dev/wmframe: the first 24 bytes say which window, at what offset, and
-// how many bytes; the rest is the frame itself.
+// /dev/wmframe: the first 32 bytes say which window, at what offset, how
+// many bytes, and a sequence number; the rest is the frame itself.
 export fn frame_read(buf: []u8, off: u64, n: size) size = {
 	if (n == 0 || len(buf) == 0) {
 		return 0;
 	};
-	if (off < 24) {
-		let hdr: [24]u8 = [0...];
+	if (off < 32) {
+		let hdr: [32]u8 = [0...];
 		put64(hdr[..], 0, framewin: u64);
 		put64(hdr[..], 8, frameoff);
 		put64(hdr[..], 16, framed: u64);
+		put64(hdr[..], 24, frameseq);
 		let k = 0z;
-		for (k < n && (k: u64) < (24: u64) - off && k < len(buf)) {
+		for (k < n && (k: u64) < (32: u64) - off && k < len(buf)) {
 			buf[k] = hdr[(off + (k: u64)): size];
 			k += 1;
 		};
 		return k;
 	};
-	const at = off - 24;
+	const at = off - 32;
 	if (at >= (FRAME: u64) || framed == 0) {
 		return 0;
 	};

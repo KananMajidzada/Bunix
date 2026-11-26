@@ -73,19 +73,26 @@ fn requests() void = {
 	_ = rt::writefile("/dev/wmreply", reply[..]);
 };
 
+let lastframe = 0u64;
+
 fn frames(scratch: uintptr) void = {
-	let hdr: [24]u8 = [0...];
+	let hdr: [32]u8 = [0...];
 	const n = rt::readat("/dev/wmframe", 0, hdr[..]);
-	if (n < 24) {
+	if (n < 32) {
 		return;
 	};
+	const seq = get64(hdr[..], 24);
+	if (seq == lastframe) {
+		return;
+	};
+	lastframe = seq;
 	const wi = get64(hdr[..], 0): size;
 	const off = get64(hdr[..], 8);
 	const count = get64(hdr[..], 16): size;
 	if (wi == NONE || count == 0 || count > 640 * 400 * 4) {
 		return;
 	};
-	const got = rt::readat("/dev/wmframe", 24, bytes(scratch, count));
+	const got = rt::readat("/dev/wmframe", 32, bytes(scratch, count));
 	if (got > 0) {
 		draw_frame(wi, bytes(scratch, got), off);
 	};
@@ -107,6 +114,10 @@ fn on_close_window(id: size) void = {
 	_ = rt::kill(id);
 };
 
+let lastw: size = ~0z;
+let lasth: size = ~0z;
+let lastfocus: size = ~0z;
+
 fn report_state() void = {
 	if (take_fresh()) {
 		const one: [1]u8 = [0];
@@ -115,13 +126,20 @@ fn report_state() void = {
 	let w = 0z;
 	let h = 0z;
 	gfx_dims(&w, &h);
-	let d: [16]u8 = [0...];
-	put64(d[..], 0, w: u64);
-	put64(d[..], 8, h: u64);
-	_ = rt::writefile("/dev/wmdims", d[..]);
+	if (w != lastw || h != lasth) {
+		lastw = w;
+		lasth = h;
+		let d: [16]u8 = [0...];
+		put64(d[..], 0, w: u64);
+		put64(d[..], 8, h: u64);
+		_ = rt::writefile("/dev/wmdims", d[..]);
+	};
 	const wi = focus_win();
-	const one: [1]u8 = [wi: u8];
-	_ = rt::writefile("/dev/wmfocus", one[..]);
+	if (wi != lastfocus) {
+		lastfocus = wi;
+		const one: [1]u8 = [wi: u8];
+		_ = rt::writefile("/dev/wmfocus", one[..]);
+	};
 };
 
 export @symbol("main") fn main() void = {
