@@ -124,4 +124,66 @@ static inline void bunix_sleepms(uint64_t ms) {
     }
 }
 
+// The sound card as a file. /dev/audio takes PCM samples in the format
+// /dev/audioctl names - "rate channels bits" - and plays them. Writing blocks
+// while the card's buffer is full, so a program that keeps it fed is paced by
+// the card itself rather than by its own clock. Sixteen bits are signed,
+// eight are unsigned, as the card and every other machine of its age expect.
+//
+// This is the whole sound API: a program that can write a file can make a
+// sound, and a port needs no more of the machine than this.
+
+// A decimal number at the end of buf, returning the new length.
+static inline int bunix_audio_putnum(char *buf, int n, uint32_t v) {
+    char tmp[10];
+    int k = 0;
+    if (v == 0) {
+        buf[n++] = '0';
+        return n;
+    }
+    while (v > 0) {
+        tmp[k++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    while (k > 0) {
+        buf[n++] = tmp[--k];
+    }
+    return n;
+}
+
+// Sets the format of /dev/audio. Returns 0 on success.
+static inline int bunix_audio_format(uint32_t rate, uint32_t channels,
+                                     uint32_t bits) {
+    char buf[32];
+    int n = bunix_audio_putnum(buf, 0, rate);
+    buf[n++] = ' ';
+    n = bunix_audio_putnum(buf, n, channels);
+    buf[n++] = ' ';
+    n = bunix_audio_putnum(buf, n, bits);
+    return bunix_writefile("/dev/audioctl", buf, (size_t)n) == n ? 0 : -1;
+}
+
+// Plays bytes of PCM. Returns the number of bytes the card took, which is
+// every one of them unless the card has stopped answering.
+static inline ssize_t bunix_audio_write(const void *pcm, size_t bytes) {
+    return bunix_writefile("/dev/audio", pcm, bytes);
+}
+
+// Stops what is playing and empties the queue.
+static inline int bunix_audio_stop(void) {
+    return bunix_writefile("/dev/audioctl", "stop", 4) == 4 ? 0 : -1;
+}
+
+// Sets the machine's volume, from zero to a hundred.
+static inline int bunix_audio_volume(int percent) {
+    char buf[16];
+    const char *p = "volume ";
+    int n = 0;
+    while (*p) {
+        buf[n++] = *p++;
+    };
+    n = bunix_audio_putnum(buf, n, (uint32_t)percent);
+    return bunix_writefile("/dev/audioctl", buf, (size_t)n) == n ? 0 : -1;
+}
+
 #endif

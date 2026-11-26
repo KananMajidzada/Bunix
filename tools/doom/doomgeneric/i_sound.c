@@ -18,7 +18,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if defined(FEATURE_SOUND) && !defined(__DJGPP__)
+// Bunix has its own sound module writing to /dev/audio, so it needs none of
+// SDL's mixer declarations even though sound is compiled in.
+#if defined(FEATURE_SOUND) && !defined(__DJGPP__) && !defined(BUNIX)
 #include <SDL_mixer.h>
 #endif
 

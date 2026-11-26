@@ -76,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [75]entry = [
+const MANUAL: [76]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -98,6 +98,7 @@ const MANUAL: [75]entry = [
 	entry { name = "man", help = "say what a command does", builtin = true , paths = false },
 	entry { name = "uptime", help = "say how long the machine has been up", builtin = true , paths = false },
 	entry { name = "free", help = "say how much memory is left", builtin = true , paths = false },
+	entry { name = "vol", help = "say or set the sound volume: vol [0-100]", builtin = true , paths = false },
 	entry { name = "sleep", help = "wait for a number of seconds", builtin = true , paths = false },
 	entry { name = "clear", help = "clear the screen", builtin = true , paths = false },
 	entry { name = "true", help = "do nothing, and succeed", builtin = true , paths = false },
@@ -605,6 +606,8 @@ fn run_command(line: []u8) bool = {
 		let fb: [128]u8 = [0...];
 		const k = rt::readfile("/proc/mem", fb[..]);
 		rt::write(fb[..k]);
+	} else if (str_eq(cmd, "vol")) {
+		run_vol(rest);
 	} else if (str_eq(cmd, "sleep")) {
 		run_sleep(rest);
 	} else if (str_eq(cmd, "true")) {
@@ -1231,6 +1234,72 @@ fn tut_machine() void = {
 };
 
 // Waits for a number of seconds.
+// The machine's volume, through /dev/audioctl. With no argument it says
+// what the volume is; with a number it sets it. The setting belongs to the
+// machine, not to one program, so it survives a change of tune.
+fn run_vol(rest: []u8) void = {
+	let n = len(rest);
+	for (n > 0 && (rest[n - 1] == (' ': u8) || rest[n - 1] == ('\t': u8)
+			|| rest[n - 1] == ('\n': u8) || rest[n - 1] == ('\r': u8))) {
+		n -= 1;
+	};
+	const arg = rest[..n];
+	if (len(arg) > 0) {
+		let v = 0u64;
+		if (lib::number(arg, &v) == 0 || v > 100) {
+			rt::println("usage: vol <0-100>");
+			return;
+		};
+		let buf: [16]u8 = [0...];
+		const head = *(&"volume ": *[]u8);
+		let k = 0z;
+		for (let i = 0z; i < len(head); i += 1) {
+			buf[k] = head[i];
+			k += 1;
+		};
+		let tmp: [20]u8 = [0...];
+		let m = len(tmp);
+		if (v == 0) {
+			m -= 1;
+			tmp[m] = ('0': u8);
+		} else {
+			let q = v;
+			for (q > 0) {
+				m -= 1;
+				tmp[m] = ('0': u8) + (q % 10): u8;
+				q /= 10;
+			};
+		};
+		for (let i = m; i < len(tmp); i += 1) {
+			buf[k] = tmp[i];
+			k += 1;
+		};
+		if (rt::writefile("/dev/audioctl", buf[..k]) != k) {
+			rt::println("vol: no sound card");
+			return;
+		};
+	};
+	let b: [64]u8 = [0...];
+	const got = rt::readfile("/dev/audioctl", b[..]);
+	let at = 0z;
+	let cur = 0u64;
+	for (let field = 0z; field < 4; field += 1) {
+		for (at < got && (b[at] == (' ': u8) || b[at] == ('\n': u8)
+				|| b[at] == ('\t': u8) || b[at] == ('\r': u8))) {
+			at += 1;
+		};
+		const used = lib::number(b[at..got], &cur);
+		if (used == 0) {
+			rt::println("vol: no sound card");
+			return;
+		};
+		at += used;
+	};
+	rt::print("volume ");
+	rt::printnum(cur);
+	rt::println("");
+};
+
 fn run_sleep(rest: []u8) void = {
 	let secs: u64 = 0;
 	if (lib::number(rest, &secs) == 0) {

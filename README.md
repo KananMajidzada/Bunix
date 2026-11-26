@@ -175,10 +175,17 @@ That leaves you a `bunix.bin`.
 
 ## Run
 
-	qemu-system-x86_64 -m 256 -kernel bunix.bin -serial stdio
+	/usr/bin/qemu-system-x86_64 -m 256 -kernel bunix.bin -display gtk -serial stdio
 
-or just `make run`. The screen you get is drawn on the framebuffer; the serial
-line carries the same text.
+or just `make run`, which opens a graphical window and sends the machine's
+sound to the host's speakers. The screen is drawn on the framebuffer; the
+serial line carries the same text. `make run-nographic` is the same machine
+with no window, for when there is no display.
+
+`make` uses `/usr/bin/qemu-system-x86_64` on purpose: the copy in
+`~/.local/bin` was built with only the `none` display and `wav` audio backends,
+so it cannot open a window or play through the speakers. If your system QEMU
+lives elsewhere, set `QEMU` in `config.mk`.
 
 Type `help` to see what the shell knows, and `tutorial` for a walk through
 the system, a page at a time. `man <command>` says what one command does.
@@ -189,6 +196,38 @@ To give the machine a disk, add one to QEMU and it is mounted at `/mnt`:
 		-drive file=disk.img,format=raw,if=ide
 
 The disk is a file, so a copy of it is a copy of everything on it.
+
+## Sound
+
+Sound is a file, like the screen and the keyboard. `cat /proc/audio` says what
+card was found; `/dev/audioctl` holds the format as `rate channels bits volume`;
+writing PCM to `/dev/audio` plays it. `tone` is a small example, and `vol` says
+or sets the volume of the whole machine from 0 to 100:
+
+	ush> cat /proc/audio
+	sb16 base 544 irq 5 dma 1 5 blocks 0 irqs 0 queued 0 volume 100
+	ush> vol 50
+	volume 50
+	ush> tone
+	tone: played 440 Hz for a second
+
+The volume is a setting of the machine, not of one program: it is applied in
+the kernel on the way to the card, so it works for every program that writes
+`/dev/audio`, and it stays when the format or the tune changes.
+
+The kernel drives a Sound Blaster 16 through ISA DMA and an interrupt, and a
+program needs no sound-specific system call: the helpers in `dev.h` are just
+the ordinary read and write calls. Any port that uses them gets sound in the
+same way. `make run` passes QEMU the flags to create the card and connect it
+to PulseAudio:
+
+	/usr/bin/qemu-system-x86_64 -m 256 -kernel bunix.bin -display gtk -serial stdio \
+		-audiodev pa,id=snd0 \
+		-device sb16,audiodev=snd0 -M pcspk-audiodev=snd0
+
+`make run-wav` records what the card plays in `/tmp/bunix.wav` instead, which
+is handy for checking sound without listening to it. Without a card, the files
+simply answer with nothing and the machine is quiet.
 
 ## DOOM
 
@@ -206,8 +245,14 @@ only.
 	ush> doom
 
 `/Doom/doom` works from anywhere too. Everything is a file: the window is
-`/dev/win`, the keys arrive on `/dev/kbd`, and the framebuffer it draws on
-is `/dev/fb` — DOOM is just a program reading and writing files.
+`/dev/win`, the keys arrive on `/dev/kbd`, the framebuffer it draws on is
+`/dev/fb`, and the sound effects are written to `/dev/audio` — DOOM is just a
+program reading and writing files. The game mixes its own samples against the
+clock it runs on, so a shot is heard when it happens. Music is quiet for now:
+those lumps are MIDI for an OPL chip, not samples. Quitting from the game's
+menu ends the process and hands the prompt back to `ush>`. Deleting the game's
+window from the desktop menu ends it too, so nothing is left playing or
+stealing time in the background.
 
 Controls, keyboard only:
 

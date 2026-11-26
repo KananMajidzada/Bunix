@@ -155,6 +155,43 @@ terminal is ready to type in. Like the text console, it lives in the kernel for
 now; the plan is for a window system to become one more file server a process
 can mount.
 
+## Audio
+
+Sound is a file like everything else. `/dev/audio` takes PCM samples and plays
+them; `/dev/audioctl` says and sets the format as `rate channels bits volume`,
+takes `volume N` to set the machine's volume from 0 to 100, and takes `stop`;
+`/proc/audio` says what card was found. The `vol` shell command is just a
+reader and writer of that control file. A program that already
+knows how to write a file can make a sound, with no sound system call and no
+knowledge of the hardware. The helpers in `userland/rt/dev.h` wrap the three
+files for C programs, so a port gets sound by calling them just as it gets
+pixels from `/dev/fb` and keys from `/dev/kbd`.
+
+The driver is a Sound Blaster 16. It is found by resetting the DSP and asking
+for its version, then reading the interrupt line and DMA channels out of the
+mixer, so a card on a nonstandard line still works. Sixteen-bit signed and
+eight-bit unsigned samples, mono or stereo, are all accepted; the rate can be
+anything from 5 kHz to 45 kHz. Samples go into a ring buffer in low memory,
+where the ISA DMA controller can reach them, and are handed to the card a block
+at a time. The block-done interrupt starts the next block, so the card keeps
+playing between the program's writes. A write waits only when the ring is
+full, which also paces a program that is producing sound in real time. If the
+card is not there, the files answer with nothing and the machine is simply
+quiet; no program has to know the difference.
+
+The card belongs to one program at a time. When that program leaves, whatever
+it had queued is stopped, so a game does not leave a tune playing in an empty
+desktop. The layer above the driver knows nothing about SB16 registers, which
+leaves room for an AC'97 driver later without changing any program.
+
+Doom is the first user of the interface. Its WAD holds eight-bit mono DMX
+samples; the game's own Bunix sound module converts them to sixteen-bit stereo
+at the card's rate, mixes up to sixteen effects with Doom's volume and
+separation, and writes the result to `/dev/audio`. The game generates sound
+against the same clock it runs on, so an effect is heard when it happens and
+not after the next frame. Music is still quiet: those lumps are MIDI for an
+OPL chip, and the module has a place to be filled in when that is wanted.
+
 ## Processes and memory
 
 Kernel threads are scheduled round-robin by the timer. Each thread carries a
@@ -344,6 +381,15 @@ prints the three columns and keeps `-1`, `-2` and `-3` from showing one,
 with `-r` and takes more than one file. `tr` holds ranges, as in `a-z`, and
 `split` takes the name the pieces are given.
 
+Done also: sound as a file. A Sound Blaster 16 is found and driven through
+`/dev/audio` and `/dev/audioctl`, with a ring buffer and interrupt-driven DMA
+in the kernel, and `tone` plays through it. The `vol` command sets a system
+volume applied for every program. Doom uses the same files for its effects, so
+a game needs nothing of the card that any other program does not have. Quitting
+it from its menu calls `exit`, which reaps the process, frees its window and
+stops its sound; deleting its drawing window from the desktop does the same.
+Either way the shell prompt comes back and no game is left running unseen.
+
 Started: the port environment. A POSIX shim in userspace gives the user program
 `open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
 `wc`, `grep`, and `cp` are written against it, and each is a loadable image of
@@ -367,3 +413,5 @@ Next: a C compiler driver for the port environment.
    [done]
 10. Output redirection. [done]
 11. A pipe, as a file. [done]
+12. Sound as a file, with a Sound Blaster 16 behind it and Doom using it.
+    [done; music not yet]

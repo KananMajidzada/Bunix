@@ -13,6 +13,11 @@ use rt;
 // the loop next waits for input, so a command's output costs one repaint
 // rather than one per letter or line.
 
+// Closing a program's own drawing window ends the program. Kit cannot name
+// a process on its own - the scheduler owns those - so main installs this
+// hook. A plain terminal has no owner to close.
+export let close_hook: nullable *fn(id: size) void = null;
+
 def MAXWIN: size = 6;
 def MAXCOLS: size = 120;
 def MAXROWS: size = 40;
@@ -1303,7 +1308,21 @@ fn menu_activate(sel: int) void = {
 		gox = mx - wins[wi].wx;
 		goy = my - wins[wi].wy;
 	} else if (sel == 3) {
-		delete_window(wi);
+		// A graphic window belongs to a running program. Deleting it
+		// without ending that program would leave a game playing in a
+		// window nobody can see.
+		if (wi != NONE && wins[wi].used && wins[wi].graphic) {
+			const owner = wins[wi].owner;
+			delete_window(wi);
+			match (close_hook) {
+			case let f: *fn(id: size) void =>
+				f(owner);
+			case null => void;
+			};
+		} else {
+			delete_window(wi);
+		};
+		repaint();
 	} else if (sel == 4) {
 		hide_window(wi);
 	} else if (sel == 5) {

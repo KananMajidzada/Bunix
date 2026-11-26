@@ -1103,6 +1103,21 @@ export fn init() void = {
 	nodes[spk].wdsk = &speaker_write;
 	link(dev, spk);
 
+	// The sound card as a file: a write is PCM in the format /dev/audioctl
+	// says, and it plays. This is the file every program uses, so a game
+	// needs no code of its own for the card and the machine needs no
+	// second sound API.
+	const audio = mknode("audio", false);
+	nodes[audio].wdsk = &sound::audio_write;
+	link(dev, audio);
+
+	// The format of that PCM, as "rate channels bits", and "stop" to end
+	// what is playing. Reading it says what the card is set to.
+	const actl = mknode("audioctl", false);
+	nodes[actl].gdsk = &sound::audioctl_read;
+	nodes[actl].wdsk = &sound::audioctl_write;
+	link(dev, actl);
+
 	const version = mknode("version", false);
 	nodes[version].gen = &gen_version;
 	link(proc, version);
@@ -1140,6 +1155,10 @@ export fn init() void = {
 	const diskstat = mknode("disk", false);
 	nodes[diskstat].gen = &gen_disk;
 	link(proc, diskstat);
+
+	const audiostat = mknode("audio", false);
+	nodes[audiostat].gen = &sound::audio_status;
+	link(proc, audiostat);
 
 	dmount();
 	nss[0].root = root;
@@ -1198,6 +1217,9 @@ fn bound(id: size) bool = {
 };
 
 export fn ns_reap(id: size) void = {
+	// A program that leaves takes its sound with it, whether it had a tree
+	// of its own or shared the one it was started in.
+	sound::audio_release(id);
 	if (id >= MAXNS || !nss[id].owned) {
 		return;
 	};

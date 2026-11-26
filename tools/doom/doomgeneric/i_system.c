@@ -257,11 +257,12 @@ void I_Quit (void)
         entry = entry->next;
     }
 
-#if ORIGCODE
-    SDL_Quit();
-
+    // Quit means leave the game. Doom's own exit handlers have run above;
+    // exit() runs the C runtime's handlers (which put the screen back) and
+    // then ends this process, so the shell gets its prompt again. Without
+    // this the menu could only restore the screen while the game kept
+    // running underneath it.
     exit(0);
-#endif
 }
 
 #if !defined(_WIN32) && !defined(__MACOSX__) && !defined(__DJGPP__)

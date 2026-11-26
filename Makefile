@@ -9,7 +9,7 @@ SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 # Programs that get an image of their own. The shell runs them by name.
 # Each one ends up as both a real ELF (for nm, to read _start and __image_end)
 # and a flat blob (the bytes the loader copies into user memory).
-PROGS = hello wc grep cp cc test_c fbtest tcc mei doom \
+PROGS = hello wc grep cp cc test_c fbtest tone tcc mei doom \
 	ls sort uniq head tail tr rev seq expr basename dirname \
 	stat du df test find tree \
 	mv nl cut paste comm diff od strings cksum file uname id split \
@@ -18,7 +18,7 @@ PROGS = hello wc grep cp cc test_c fbtest tcc mei doom \
 # Programs written in Hare, built by the Hare compiler.
 HARE_PROGS = $(filter-out $(C_PROGS),$(PROGS))
 # Programs written in C, cross-compiled on the host by bcc.
-C_PROGS = test_c fbtest
+C_PROGS = test_c fbtest tone
 
 PROG_ELFS = $(addprefix build/elf_,$(PROGS))
 PROG_BINS = $(addprefix build/prog_,$(addsuffix .bin,$(PROGS)))
@@ -218,12 +218,14 @@ DOOM_OBJS = $(addsuffix .o,$(addprefix build/doom/, \
 	p_switch p_telept p_tick p_user r_bsp r_data r_draw r_main r_plane \
 	r_segs r_sky r_things sha1 sounds statdump st_lib st_stuff s_sound \
 	tables v_video wi_stuff w_checksum w_file w_main w_wad z_zone \
-	w_file_stdc i_input i_video doomgeneric doomgeneric_bunix))
+	w_file_stdc i_input i_video doomgeneric doomgeneric_bunix \
+	doomgeneric_bunix_sound))
 DOOM_HDRS = $(wildcard $(DOOM_DIR)/*.h)
 # The game is old C written for other compilers: strict aliasing and the
 # warnings its style would raise are turned off, everything else about the
 # runtime's freestanding setup is kept.
 DOOM_CFLAGS = -I$(C_RT_DIR) -I$(DOOM_DIR) \
+	-DBUNIX -DFEATURE_SOUND \
 	-ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
 	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2 \
 	-fno-strict-aliasing \
@@ -290,15 +292,29 @@ user/progs.ha: build/progs.bin $(PROG_ELFS)
 	   done; \
 	   printf '];\n'; } > $@
 
+# One audio backend feeds both the old PC speaker and the sound card, so a
+# program that writes /dev/speaker or /dev/audio reaches the same speakers.
+# `make run` opens a graphical window; `run-nographic` is the serial-only
+# machine for when there is no display. Both need a QEMU with gtk and pa.
 run: bunix.bin
-	$(QEMU) -m 256 -kernel bunix.bin -serial stdio \
-	       -audiodev pa,id=pa0 -M pcspk-audiodev=pa0
+	$(QEMU) -m 256 -kernel bunix.bin -display gtk -serial stdio \
+	       -audiodev pa,id=snd0 \
+	       -device sb16,audiodev=snd0 -M pcspk-audiodev=snd0
 
 run-nographic: bunix.bin
-	$(QEMU) -m 256 -kernel bunix.bin -display none -serial stdio
+	$(QEMU) -m 256 -kernel bunix.bin -display none -serial stdio \
+	       -audiodev pa,id=snd0 \
+	       -device sb16,audiodev=snd0 -M pcspk-audiodev=snd0
+
+# Records what the card plays into a WAV file instead of sending it to the
+# speakers. Useful for checking sound without listening to it.
+run-wav: bunix.bin
+	$(QEMU) -m 256 -kernel bunix.bin -display gtk -serial stdio \
+	       -audiodev wav,id=snd0,path=/tmp/bunix.wav \
+	       -device sb16,audiodev=snd0 -M pcspk-audiodev=snd0
 
 clean:
 	rm -rf bunix bunix.bin build user/blob.ha user/progs.ha user/progs.s \
 	user/bootsec.ha user/wad.ha user/wad.s
 
-.PHONY: all run run-nographic clean
+.PHONY: all run run-nographic run-wav clean

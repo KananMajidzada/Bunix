@@ -11,6 +11,7 @@ use paging;
 use rt;
 use sched;
 use shell;
+use sound;
 use sys;
 use syscall;
 
@@ -62,6 +63,21 @@ fn on_new_win(wi: size) void = {
 	sched::bind_shell(id, wi);
 };
 
+// An interrupt may be the keyboard's, the card's, or one of the things
+// added later. Each module looks at the line and ignores the ones that are
+// not its own.
+fn on_irq(vec: u64) void = {
+	console::irq(vec);
+	sound::audio_irq(vec);
+};
+
+// Closing a program's drawing window closes the program. The game's own menu
+// is the gentle way out; this is what happens when the window is deleted from
+// the desktop's menu, and it leaves nothing playing behind it.
+fn on_close_window(id: size) void = {
+	_ = sched::kill(id);
+};
+
 export @symbol("main") fn main(mbi: uintptr) void = {
 	if (mbi == 0) {
 		console::println("bunix: no multiboot information");
@@ -87,6 +103,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		fb::vbe();
 	};
 	kit::new_win_hook = &on_new_win;
+	kit::close_hook = &on_close_window;
 	kit::begin();
 
 	if (fb::active()) {
@@ -117,6 +134,7 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	};
 
 	fs::init();
+	sound::audio_init();
 	console::print("frames:    ");
 	console::printnum(mem::free_frames());
 	console::print(" free of ");
@@ -132,13 +150,25 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 		console::println("none");
 	};
 
+	console::print("audio:     ");
+	if (sound::audio_present()) {
+		console::print("sb16, irq ");
+		console::printnum(sound::audio_irq_line());
+	} else {
+		console::print("none");
+	};
+	console::println("");
+
 	architecture::fault_hook = &on_fault;
 	architecture::idt_init();
 	architecture::pic_remap();
 	architecture::timer_init();
-	architecture::irq_hook = &console::irq;
+	architecture::irq_hook = &on_irq;
 	architecture::pic_unmask(0);
 	architecture::pic_unmask(1);
+	if (sound::audio_present()) {
+		architecture::pic_unmask(sound::audio_irq_line());
+	};
 	architecture::tss_init();
 	sched::fpu_init();
 

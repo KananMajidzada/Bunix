@@ -15,4 +15,7 @@ CC = cc
 # Target architecture. Only x86_64 is implemented.
 ARCH = x86_64
 
-QEMU = qemu-system-x86_64
+# The build in ~/.local/bin has only the "none" display and "wav" audio
+# backends, so it cannot open a window or play through the host's speakers.
+# The system QEMU has gtk/sdl and pulseaudio; use it for `make run`.
+QEMU = /usr/bin/qemu-system-x86_64
