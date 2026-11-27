@@ -713,6 +713,15 @@ fn session_focus_write(data: []u8, off: u64) size = {
 	return len(data);
 };
 
+fn session_spawn_write(data: []u8, off: u64) size = {
+	_ = off;
+	if (len(data) < 1) {
+		return 0;
+	};
+	session::set_spawn(data[0]: size);
+	return len(data);
+};
+
 fn session_fresh_write(data: []u8, off: u64) size = {
 	_ = data;
 	_ = off;
@@ -1176,6 +1185,10 @@ export fn init() void = {
 	const sessionfocus = mknode("sessionfocus", false);
 	nodes[sessionfocus].wdsk = &session_focus_write;
 	link(dev, sessionfocus);
+
+	const sessionspawn = mknode("sessionspawn", false);
+	nodes[sessionspawn].wdsk = &session_spawn_write;
+	link(dev, sessionspawn);
 
 	const gfxdims = mknode("gfxdims", false);
 	nodes[gfxdims].wdsk = &gfx_dims_write;

@@ -100,6 +100,11 @@ export fn req_write(data: []u8, off: u64) size = {
 	if (reqcount + len(data) > len(req)) {
 		return 0;
 	};
+	// A new request invalidates the last answer. Without this a program
+	// opening its second window sails past the wait in /dev/win using the
+	// previous session number, before the compositor has made the new
+	// surface, and its first frames go to the wrong picture.
+	has_answer = false;
 	for (let i = 0z; i < len(data); i += 1) {
 		req[reqcount] = data[i];
 		reqcount += 1;
@@ -133,6 +138,10 @@ export fn reply_write(data: []u8, off: u64) size = {
 	for (let i = 0z; i < 24; i += 1) {
 		reply[i] = data[i];
 	};
+	// The answer carries the picture's size as well as its session. Publish
+	// the size here, so a program reading /dev/win straight after asking for
+	// a window sees it at once instead of racing the compositor's next loop.
+	set_dims(get64(reply[..], 8): size, get64(reply[..], 16): size);
 	has_answer = true;
 	return len(data);
 };

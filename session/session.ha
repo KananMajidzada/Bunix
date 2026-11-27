@@ -8,6 +8,7 @@
 // files with its own idea of a window.
 
 @symbol("sched.bind_shell") fn sched_bind(id: size, ses: size) void;
+@symbol("sched.set_spawn_ses") fn sched_set_spawn(wi: size) void;
 
 def MAXOUT: size = 8192;
 
@@ -31,6 +32,11 @@ export fn target() size = {
 export fn focus() size = return focused;
 export fn set_focus(ses: size) void = focused = ses;
 export fn set_target(ses: size) void = targetses = ses;
+
+// The session the compositor wants the next program to start in. It has to be
+// set before the program is spawned: the scheduler gives a thread its session
+// as it enters, and a shell's first words are printed immediately after that.
+export fn set_spawn(ses: size) void = sched_set_spawn(ses);
 
 // A byte of console output, tagged with the session it came from. Two bytes
 // per character: the session number, then the byte.

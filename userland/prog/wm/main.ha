@@ -127,9 +127,13 @@ fn exits() bool = {
 	return i > 0;
 };
 
-// A new terminal window needs a shell of its own. The kernel binds it to
-// the window so its keystrokes go to the right place.
+// A new terminal window needs a shell of its own. It has to start in that
+// session before it says anything, or its banner and prompt land in the
+// terminal the window was opened from. The kernel binds the shell to the
+// window afterwards so its keystrokes go to the right place as well.
 fn on_new_window(wi: size) void = {
+	const s: [1]u8 = [wi: u8];
+	_ = rt::writefile("/dev/sessionspawn", s[..]);
 	const id = rt::spawn_shared("/sh");
 	if (id == ~0u64) {
 		return;
