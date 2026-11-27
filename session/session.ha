@@ -69,6 +69,40 @@ export fn take_fresh() bool = {
 	return was;
 };
 
+// When a thread ends, a compositor may need to take back whatever it made for
+// that thread. The kernel only reports the two opaque numbers it knows: the
+// thread and the session it had. It says nothing about windows.
+def MAXEXIT: size = 64;
+let exitbuf: [MAXEXIT]u8 = [0...];
+let exith: size = 0;
+let exitt: size = 0;
+let exitn: size = 0;
+
+export fn exited(id: size, ses: size) void = {
+	if (exitn + 2 > len(exitbuf)) {
+		return;
+	};
+	exitbuf[exitt] = id: u8;
+	exitt = (exitt + 1) % MAXEXIT;
+	exitbuf[exitt] = ses: u8;
+	exitt = (exitt + 1) % MAXEXIT;
+	exitn += 2;
+};
+
+// /dev/sessionexit: pairs of thread number and session number, for whoever is
+// managing the surfaces those numbers were used for.
+export fn exit_read(buf: []u8, off: u64, n: size) size = {
+	_ = off;
+	let k = 0z;
+	for (k < n && k < len(buf) && exitn > 0) {
+		buf[k] = exitbuf[exith];
+		exith = (exith + 1) % MAXEXIT;
+		exitn -= 1;
+		k += 1;
+	};
+	return k;
+};
+
 // The compositor spawns a shell for a new session and tells the kernel which
 // session it belongs to, so keystrokes reach the right one. This is a binding
 // of a thread to an opaque number, not a window operation.

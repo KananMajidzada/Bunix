@@ -571,6 +571,9 @@ export fn release_owner(id: size) void = {
 	};
 	if (gone) {
 		appbtn = 0;
+		if (out_win != NONE && !wins[out_win].used) {
+			out_win = NONE;
+		};
 		repaint();
 	};
 };

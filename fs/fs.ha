@@ -1185,6 +1185,10 @@ export fn init() void = {
 	nodes[sessionfresh].wdsk = &session_fresh_write;
 	link(dev, sessionfresh);
 
+	const sessionexit = mknode("sessionexit", false);
+	nodes[sessionexit].gdsk = &session::exit_read;
+	link(dev, sessionexit);
+
 	const sessionbind = mknode("sessionbind", false);
 	nodes[sessionbind].wdsk = &session::bind;
 	link(dev, sessionbind);

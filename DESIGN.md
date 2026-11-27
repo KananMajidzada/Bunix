@@ -159,9 +159,17 @@ tagged console bytes from `/dev/sessionout`; it answers drawing-surface
 requests through `/dev/gfxreq` and `/dev/gfxreply`, and publishes focus, dims,
 and shell bindings through `/dev/sessionfocus`, `/dev/gfxdims`, and
 `/dev/sessionbind`. The kernel's `session` and `gfx` modules are only generic
-channels: an opaque number for input/output routing and one holding area for
-the newest frame. They know nothing about windows or desktops, so another
-window manager can use the same files. There is no `wm/` code in the kernel.
+channels: an opaque number for input/output routing, one holding area for the
+newest frame, and `/dev/sessionexit` to say when a drawing thread has gone.
+They know nothing about windows or desktops, so another window manager can use
+the same files. There is no `wm/` code in the kernel. A manager takes its
+surfaces back when their owner exits, which is why closing a game returns the
+screen to the shell instead of leaving the last frame on it.
+
+Which manager starts is a choice, not a kernel setting: `make BOOT_WM=/mywm`
+builds with that program as the default, and a boot loader's `wm=/other`
+command line wins at run time. It still has to be in the built program image,
+like any other program.
 
 ## Audio
 

@@ -74,8 +74,12 @@ fn requests() bool = {
 	let w = 0z;
 	let h = 0z;
 	gfx_dims(&w, &h);
+	// The kernel's no-session value is all ones. Kit's NONE is only a small
+	// marker for an unused slot, so it has to be translated here or a failed
+	// request binds a program to a session that does not exist.
+	const answer = if (wi == NONE) ~0z else wi;
 	let reply: [24]u8 = [0...];
-	put64(reply[..], 0, wi: u64);
+	put64(reply[..], 0, answer: u64);
 	put64(reply[..], 8, w: u64);
 	put64(reply[..], 16, h: u64);
 	_ = rt::writefile("/dev/gfxreply", reply[..]);
@@ -108,6 +112,19 @@ fn frames(scratch: uintptr) bool = {
 		draw_frame(wi, bytes(scratch, got), off);
 	};
 	return true;
+};
+
+// A drawing program has ended. The kernel only tells us the two numbers it
+// knows; kit decides whether they named one of its windows and clears it.
+fn exits() bool = {
+	let b: [32]u8 = [0...];
+	const n = rt::readfile("/dev/sessionexit", b[..]);
+	let i = 0z;
+	for (i + 1 < n) {
+		release_owner(b[i]: size);
+		i += 2;
+	};
+	return i > 0;
 };
 
 // A new terminal window needs a shell of its own. The kernel binds it to
@@ -175,6 +192,9 @@ export @symbol("main") fn main() void = {
 			work = true;
 		};
 		if (frames(scratch)) {
+			work = true;
+		};
+		if (exits()) {
 			work = true;
 		};
 		// Poll for a few pointer edges, not thirty-two. Each try pokes the

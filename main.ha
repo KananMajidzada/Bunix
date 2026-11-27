@@ -14,6 +14,7 @@ use shell;
 use sound;
 use sys;
 use syscall;
+use user;
 
 fn on_fault(regs: *architecture::registers) uintptr = {
 	if ((regs.cs & 3) == 3) {
@@ -151,8 +152,14 @@ export @symbol("main") fn main(mbi: uintptr) void = {
 	architecture::sti();
 
 	// The window manager is a program too. It takes over the screen before
-	// the shell starts writing into its first terminal.
-	_ = loader::run("/wm");
+	// the shell starts writing into its first terminal. The boot command line
+	// can name another one, so a new desktop can be tried without rebuilding
+	// the kernel: wm=/mywm.
+	const chosen = boot::option(mb, "wm=");
+	const wm = if (len(chosen) > 0) *(&chosen: *str) else user::wm;
+	console::print("wm:        ");
+	console::println(wm);
+	_ = loader::run(wm);
 	const init_id = loader::run("/sh");
 	sched::bind_shell(init_id, 0);
 	console::println("");

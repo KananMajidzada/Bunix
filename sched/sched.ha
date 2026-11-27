@@ -111,8 +111,10 @@ fn cleanup(id: size) void = {
 	threads[id].cleaned = true;
 	free_user(id);
 	// A drawing session made for this thread has nothing left to draw into it,
-	// so it goes the way the thread does.
+	// so it goes the way the thread does. Whoever manages surfaces for the
+	// session hears about it here, however the thread ended.
 	gfxof[id] = false;
+	session::exited(id, threads[id].ses);
 	reap(threads[id].id: size);
 };
 

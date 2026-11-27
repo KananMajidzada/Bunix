@@ -3,6 +3,7 @@
 export def MAGIC: u32 = 0x2BADB002;
 
 export def FLAG_MEMORY: u32 = 1 << 0;
+export def FLAG_CMD: u32 = 1 << 2;
 export def FLAG_MMAP: u32 = 1 << 6;
 export def FLAG_VIDEO: u32 = 1 << 12;
 
@@ -47,6 +48,64 @@ export def TYPE_AVAILABLE: u32 = 1;
 
 export fn at(addr: uintptr) *info = {
 	return (addr: *info);
+};
+
+type slicehdr = struct {
+	data: uintptr,
+	length: size,
+	capacity: size,
+};
+
+fn span(addr: uintptr, n: size) []u8 = {
+	const h = slicehdr { data = addr, length = n, capacity = n };
+	return *(&h: *[]u8);
+};
+
+fn begins(b: []u8, key: str) bool = {
+	const k = *(&key: *[]u8);
+	if (len(b) < len(k)) {
+		return false;
+	};
+	for (let i = 0z; i < len(k); i += 1) {
+		if (b[i] != k[i]) {
+			return false;
+		};
+	};
+	return true;
+};
+
+// A word from the boot command line, such as wm=/mywm. The loader's command
+// line is a string in memory the firmware already maps; this only reads it.
+export fn option(mb: *info, key: str) []u8 = {
+	if ((mb.flags & FLAG_CMD) == 0 || mb.cmdline == 0) {
+		return [];
+	};
+	const p = mb.cmdline: uintptr;
+	let n = 0z;
+	for (n < 256) {
+		if (*((p + (n: uintptr)): *u8) == 0) {
+			break;
+		};
+		n += 1;
+	};
+	if (n == 0) {
+		return [];
+	};
+	const line = span(p, n);
+	let i = 0z;
+	for (i < n) {
+		for (i < n && line[i] == (' ': u8)) {
+			i += 1;
+		};
+		const start = i;
+		for (i < n && line[i] != (' ': u8)) {
+			i += 1;
+		};
+		if (begins(line[start..i], key)) {
+			return line[start + len(key)..i];
+		};
+	};
+	return [];
 };
 
 export fn available(mb: *info) u64 = {

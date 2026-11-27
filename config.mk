@@ -15,6 +15,10 @@ CC = cc
 # Target architecture. Only x86_64 is implemented.
 ARCH = x86_64
 
+# The program that takes over the screen at boot. The boot command line can
+# override this with wm=/other, and make can override it with BOOT_WM=/other.
+BOOT_WM = /wm
+
 # The build in ~/.local/bin has only the "none" display and "wav" audio
 # backends, so it cannot open a window or play through the host's speakers.
 # The system QEMU has gtk/sdl and pulseaudio; use it for `make run`.

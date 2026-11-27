@@ -4,6 +4,8 @@
 
 include config.mk
 
+.PHONY: FORCE
+
 SRCS = $(shell find . -name '*.ha' -o -name '*.s' -o -name '*.sc')
 
 # Programs that get an image of their own. The shell runs them by name.
@@ -29,7 +31,7 @@ all: bunix.bin
 # itself so the build only sees our runtime and modules.
 bunix: build/doom1.wad user/blob.ha user/progs.ha user/progs.s user/hdrs.ha \
 	       user/src.ha user/crt.ha user/libc.ha user/bootsec.ha user/wad.ha \
-	       user/wad.s $(SRCS)
+	       user/bootwm.ha user/wad.s $(SRCS)
 	HAREPATH=. $(HARE) build -F -a$(ARCH) -o $@
 
 # QEMU's built-in Multiboot loader only accepts 32-bit ELF, so hand it a flat
@@ -56,6 +58,14 @@ user/blob.ha: build/prog.bin
 	   printf 'export const prog: [%s]u8 = [' "$$n"; \
 	   od -An -tu1 -v build/prog.bin | awk '{ for (i = 1; i <= NF; i++) printf "%s,", $$i }'; \
 	   printf '];\nexport const entry: u64 = 0x%s;\nexport const image_end: u64 = 0x%s;\n' "$$e" "$$x"; } > $@
+
+# Which desktop program starts. Kept in a generated file so a build can try
+# another manager without editing main.ha, and so a boot loader's command line
+# can still win at run time.
+user/bootwm.ha: FORCE
+	@python3 -c 'import json,sys; open(sys.argv[2], "w").write("export const wm: str = %s;\n" % json.dumps(sys.argv[1]))' '$(BOOT_WM)' $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
 
 # /usr/include holds the compiler's own headers and the C library's headers
 # together, so a program written inside Bunix can say #include <stdio.h> or
