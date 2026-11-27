@@ -2235,8 +2235,8 @@ export fn create(path: str, isdir: bool) bool = {
 	};
 	// Nothing after the last slash names nothing at all: the root itself,
 	// or a name like "." once it is resolved. A program may well ask to
-	// make a directory that is really the root - DOOM asks to make its
-	// configuration directory, which is "." - and the answer is no.
+	// make a directory that is really the root - an application asking to
+	// make its configuration directory as "." - and the answer is no.
 	if (slash == NOCHILD || slash + 1 >= end) {
 		return false;
 	};
