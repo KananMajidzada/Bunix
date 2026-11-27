@@ -3,7 +3,10 @@ use session;
 use mem;
 use paging;
 
-def MAXTHREADS: size = 8;
+// The window manager, a shell for every terminal, and a program started from
+// each of them can all be alive at once. Eight slots ran out as soon as the
+// desktop filled up, which left the last shell unable to start anything.
+def MAXTHREADS: size = 16;
 def STACK_PAGES: u64 = 4;
 def FRAME: uintptr = 176;
 
@@ -53,6 +56,7 @@ export type thread = struct {
 def FPU_SZ: size = 1024;
 def FPU_ALIGN: uintptr = 64;
 let fpuareas: [MAXTHREADS][FPU_SZ]u8 = [[0...], [0...], [0...], [0...],
+	[0...], [0...], [0...], [0...], [0...], [0...], [0...], [0...],
 	[0...], [0...], [0...], [0...]];
 let fpuready: [MAXTHREADS]bool = [false...];
 

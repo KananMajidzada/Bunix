@@ -18,7 +18,9 @@ use user;
 def MAXNODE: size = 512;
 def MAXHANDLE: size = 16;
 def MAXCHILD: size = 64;
-def MAXNS: size = 8;
+// One namespace per thread slot. A program started above this many threads
+// would otherwise share the shell's namespace and its current directory.
+def MAXNS: size = 16;
 // A directory listing is the largest thing still gathered into a fixed buffer,
 // and a full one of these node names is a little over 2 KiB.
 def BUFSZ: size = 4096;
