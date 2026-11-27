@@ -91,8 +91,12 @@ let lastframe = 0u64;
 let lastflip = 0u64;
 
 def MAXFRAME: size = 1280 * 1024 * 4;
+// The legacy /dev/fb channel is rarely used now that drawing programs map a
+// surface. Its scratch pages are taken only when a frame actually arrives, so
+// the common path does not spend memory or startup time on them.
+let frame_scratch: uintptr = 0;
 
-fn frames(scratch: uintptr) bool = {
+fn frames() bool = {
 	let hdr: [32]u8 = [0...];
 	const n = rt::readat("/dev/gfxframe", 0, hdr[..]);
 	if (n < 32) {
@@ -109,9 +113,16 @@ fn frames(scratch: uintptr) bool = {
 	if (wi == NONE || count == 0 || count > MAXFRAME) {
 		return false;
 	};
-	const got = rt::readat("/dev/gfxframe", 32, bytes(scratch, count));
+	if (frame_scratch == 0) {
+		frame_scratch = rt::page_alloc(1282);
+		if (frame_scratch == 0) {
+			return false;
+		};
+	};
+	const got = rt::readat("/dev/gfxframe", 32,
+		bytes(frame_scratch, count));
 	if (got > 0) {
-		draw_frame(wi, bytes(scratch, got), off);
+		draw_frame(wi, bytes(frame_scratch, got), off);
 	};
 	return true;
 };
@@ -202,18 +213,13 @@ export @symbol("main") fn main() void = {
 	new_win_hook = &on_new_window;
 	close_hook = &on_close_window;
 	begin();
-	// Room for the largest frame a drawing window can hand over.
-	const scratch = rt::page_alloc(1282);
-	if (scratch == 0) {
-		return;
-	};
 	let ev: [8]u8 = [0...];
 	for (true) {
 		let work = terminal();
 		if (requests()) {
 			work = true;
 		};
-		if (frames(scratch)) {
+		if (frames()) {
 			work = true;
 		};
 		if (flips()) {

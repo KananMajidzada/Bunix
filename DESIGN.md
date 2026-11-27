@@ -172,14 +172,16 @@ call 28, maps it with 29, and gives the program its id in the fourth word of
 `/dev/gfxreply` and the third number of `/dev/win`. The program maps the same
 frames with 29, writes pixels straight into them, and rings `/dev/flip` with
 the id when a frame is ready. The manager reads the id and a sequence number,
-composites that surface into its shadow, and presents the whole shadow to the
-device as before. System call 30 gives the frames back when the window is
-closed. Shared mappings are marked so a process leaving does not free frames
-the manager still reads, and a new surface comes zeroed. The size is taken
-from the screen once, so dragging a window changes the part of the surface
-that is shown without remapping it or changing its id. Programs that do not
-map a surface keep using `/dev/fb`, so a serial-only boot and another manager
-still work.
+composites that surface into its shadow, and presents the picture's rectangle
+to the device in one write. A flip already composes the overlays that sit on
+the picture, so it does not repaint the whole desktop again at the end of the
+loop. System call 30 gives the frames back when the window is closed. Shared
+mappings are marked so a process leaving does not free frames the manager still
+reads, and a new surface comes zeroed. The size is taken from the screen once,
+so dragging a window changes the part of the surface that is shown without
+remapping it or changing its id; a resize clears only the strips the old
+picture left behind, not the whole surface. Programs that do not map a surface
+keep using `/dev/fb`, so a serial-only boot and another manager still work.
 
 Which manager starts is a choice, not a kernel setting: `make BOOT_WM=/mywm`
 builds with that program as the default, and a boot loader's `wm=/other`

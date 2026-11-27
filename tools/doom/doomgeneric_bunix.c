@@ -124,9 +124,10 @@ void DG_Init(void) {
     atexit(restore_screen);
 }
 
-// The frame scaled onto the picture, written to /dev/fb in one call. The
-// write lands in the window and the window's rows are copied onto the card
-// before the call returns, so a frame is never seen in half.
+// The frame scaled onto the picture. With a shared surface the scaled pixels
+// go straight into the frames the compositor reads, so there is no staging
+// copy between the scale and the flip. Without one the picture is staged and
+// handed over in a single /dev/fb write.
 void DG_DrawFrame(void) {
     if (windowed) {
         // The player can have dragged the window to another size since the
@@ -137,19 +138,19 @@ void DG_DrawFrame(void) {
             size_picture(w, h);
         }
     }
+    uint32_t *out = shared != NULL ? shared : frame;
     for (uint32_t y = 0; y < screen_h; y++) {
         const uint32_t *src =
             DG_ScreenBuffer + (size_t)rowmap[y] * DOOMGENERIC_RESX;
-        uint32_t *dst = frame + (size_t)y * screen_w;
+        uint32_t *dst = out + (size_t)y * screen_w;
         for (uint32_t x = 0; x < screen_w; x++) {
             dst[x] = src[colmap[x]];
         }
     }
     const size_t bytes = (size_t)screen_w * screen_h * 4;
     if (shared != NULL) {
-        // The compositor maps the same frames, so no copy crosses the system
+        // The compositor maps the same frames, so no pixels cross the system
         // call boundary: we finish the picture and ring its doorbell.
-        memcpy(shared, frame, bytes);
         bunix_flip(surface);
     } else {
         bunix_fb_write(0, frame, bytes);

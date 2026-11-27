@@ -353,6 +353,21 @@ fn gfree(wi: size) void = {
 	wins[wi].gh = 0;
 };
 
+// Clears pixels that the old picture covered but the new one does not. The
+// surface keeps its old row stride until the program's next flip, so the
+// spans are walked in the old picture's shape.
+fn clear_gone(p: uintptr, x: size, y: size, w: size, h: size, stride: size) void = {
+	if (w == 0 || h == 0 || stride == 0) {
+		return;
+	};
+	for (let j = 0z; j < h; j += 1) {
+		const row = p + ((((y + j) * stride) + x) * 4): uintptr;
+		for (let i = 0z; i < w; i += 1) {
+			*((row + ((i * 4): uintptr)): *u32) = 0;
+		};
+	};
+};
+
 // Makes a picture of w by h pixels for the window. The frames are sized for
 // the whole screen once, so dragging the window only changes what part of them
 // is used: the drawing program's mapping and surface id never go stale.
@@ -361,9 +376,9 @@ fn galloc(wi: size, w: size, h: size) bool = {
 		return false;
 	};
 	// The kernel hands out zeroed frames, so a brand-new surface needs no
-	// second pass here. A resized one does: pixels outside the smaller
-	// picture must not survive from the old size.
-	let clean = false;
+	// second pass. A resize only has to clear the strips the old picture
+	// covered and the new one no longer does; wiping the whole surface made
+	// every drag edge copy megabytes for nothing.
 	if (wins[wi].gsurf == 0) {
 		const cw = fb::width();
 		const ch = fb::height();
@@ -384,14 +399,17 @@ fn galloc(wi: size, w: size, h: size) bool = {
 		wins[wi].gpages = ((cw * ch * 4 + 4095) / 4096);
 		wins[wi].gcapw = cw;
 		wins[wi].gcaph = ch;
-		clean = true;
-	} else if (w > wins[wi].gcapw || h > wins[wi].gcaph) {
-		return false;
-	};
-	if (!clean) {
-		const pages = wins[wi].gpages;
-		for (let i = 0z; i < pages * 4096 / 8; i += 1) {
-			*((wins[wi].gbuf + ((i * 8): uintptr)): *u64) = 0;
+	} else {
+		if (w > wins[wi].gcapw || h > wins[wi].gcaph) {
+			return false;
+		};
+		const ow = wins[wi].gw;
+		const oh = wins[wi].gh;
+		const rows = if (h < oh) h else oh;
+		clear_gone(wins[wi].gbuf, w, 0,
+			if (ow > w) ow - w else 0, rows, ow);
+		if (oh > h) {
+			clear_gone(wins[wi].gbuf, 0, h, ow, oh - h, ow);
 		};
 	};
 	wins[wi].gw = w;
@@ -450,7 +468,16 @@ fn show(wi: size) void = {
 		draw_menu();
 	};
 	draw_pointer();
-	fb::present();
+	// Nothing outside this rectangle changed: the game paints only its own
+	// picture, and anything that did move outside it marks a full repaint.
+	// Presenting just the picture keeps VRAM writes proportional to the game's
+	// window instead of the whole desktop. An open menu can reach outside the
+	// picture, so that case still presents everything.
+	if (menu_open) {
+		fb::present();
+	} else {
+		fb::present_rect(cx, cy, cw, ch);
+	};
 };
 
 // A program has finished a frame in a shared surface. Find the window using
@@ -461,7 +488,10 @@ export fn surface_show(surf: size) bool = {
 	};
 	for (let i = 0z; i < MAXWIN; i += 1) {
 		if (wins[i].used && wins[i].graphic && wins[i].gsurf == surf) {
-			dirty_win = i;
+			// show() already puts the new picture, the windows above it, the
+			// menu, and the pointer on the card. Marking this dirty as well
+			// made every flip repaint and present the whole desktop a second
+			// time at the end of the loop.
 			show(i);
 			return true;
 		};
@@ -701,11 +731,13 @@ fn draw_gfx(wi: size) void = {
 		wins[wi].wh - TITLE, fc);
 	fb::fill(wins[wi].wx, wins[wi].wy + wins[wi].wh - BORD, wins[wi].ww, BORD,
 		fc);
-	fb::fill(wins[wi].wx + BORD, wins[wi].wy + TITLE + BORD,
-		wins[wi].ww - 2 * BORD, wins[wi].wh - TITLE - 2 * BORD, fb::WHITE);
 	if (wins[wi].gbuf != 0) {
 		fb::blit(wins[wi].wx + BORD, wins[wi].wy + TITLE + BORD,
 			wins[wi].gw, wins[wi].gh, wins[wi].gbuf, wins[wi].gw * 4);
+	} else {
+		fb::fill(wins[wi].wx + BORD, wins[wi].wy + TITLE + BORD,
+			wins[wi].ww - 2 * BORD, wins[wi].wh - TITLE - 2 * BORD,
+			fb::WHITE);
 	};
 	const tc = if (wi == focus) fb::WHITE else TITLEIDLE;
 	fb::text(wins[wi].wx + 6, wins[wi].wy + 3, title_of(wi), tc, TITLEBG);
