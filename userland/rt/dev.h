@@ -8,9 +8,9 @@
 // key was released and BUNIX_KEY_EXT when the scancode was an extended one. A
 // game holds several keys at once and has to see the moment one is let go,
 // which a character stream cannot tell it. The clock is /proc/millis for a
-// person at the shell, but a game asks for it on every loop, so a program can
-// also get the same milliseconds straight from the clock call. The screen's
-// size is /proc/fb.
+// person at the shell, but a drawing program asks for it on every loop, so a
+// program can also get the same milliseconds straight from the clock call. The
+// screen's size is /proc/fb.
 //
 // Everything else here rides the read and write syscalls already there.
 
@@ -27,14 +27,15 @@
 
 // The pointer as a file: movement and button state as 64-bit words, one per
 // event. Movement is in the low 16 bits and the next, both signed, and the
-// buttons are at byte 4 with bit 0 left, 1 right, 2 middle. A game polls this
-// between frames; no event is waiting when the pointer has not moved.
+// buttons are at byte 4 with bit 0 left, 1 right, 2 middle. A drawing program
+// polls this between frames; no event is waiting when the pointer has not
+// moved.
 static inline int bunix_mouse_event(uint64_t *ev) {
     return bunix_readfile("/dev/mouse", ev, sizeof(*ev)) == (ssize_t)sizeof(*ev);
 }
 
 // The size of the picture the program draws into, read from /dev/win. It
-// changes when the player has dragged the window to another size - a program
+// changes when the user has dragged the window to another size - a program
 // can grow its window all the way to the screen's own edges - so a program
 // can lay out a frame that fits however large the window has become.
 static inline int bunix_win_dims(uint32_t *w, uint32_t *h) {
@@ -87,6 +88,20 @@ static inline uint64_t bunix_win_surface(void) {
 static inline void bunix_flip(uint64_t surface) {
     uint64_t id = surface;
     bunix_writeat("/dev/flip", 0, &id, sizeof(id));
+}
+
+// The usual way into the shared path: ask for a window, take the surface the
+// compositor handed back, and map it. Pixels and surface stay zero when there
+// is no compositor, and the caller can fall back to /dev/fb as before. Nothing
+// here knows what the program will draw, so every drawing program can use it.
+static inline int bunix_win_map(const char *name, uint32_t *w, uint32_t *h,
+        uint32_t **pixels, uint64_t *surface) {
+    *pixels = 0;
+    *surface = 0;
+    if (bunix_win_open(name, w, h) != 0) return -1;
+    *surface = bunix_win_surface();
+    if (*surface != 0) *pixels = bunix_surface_map(*surface);
+    return 0;
 }
 
 // The screen's size in pixels, read from /proc/fb. Returns 0 on success and

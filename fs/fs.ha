@@ -1333,13 +1333,15 @@ export fn init() void = {
 	// expects somewhere writable to exist without creating it first.
 	link(root, mknode("tmp", true));
 
-	// DOOM, as an application with a folder of its own rather than loose
-	// files in the root: /Doom holds the game's program image and its data
-	// file, like a directory of installed software. The program is named by
-	// its last path element wherever it is written down, so doom, /bin/doom
-	// and /Doom/doom are all the same image and can all be run.
-	const doomdir = mknode("Doom", true);
-	link(root, doomdir);
+	// /apps/<name> is the shape every installed program gets: a folder with
+	// its own image and data, rather than loose files in the root. The shell
+	// finds images by their last path element, so doom, /bin/doom and
+	// /apps/doom/doom all name the same program. Adding another application
+	// uses this same pattern; nothing here is specific to one game.
+	const apps = mknode("apps", true);
+	link(root, apps);
+	const doomdir = mknode("doom", true);
+	link(apps, doomdir);
 	const wad = mknode("doom1.wad", false);
 	nodes[wad].content = user::wad();
 	link(doomdir, wad);

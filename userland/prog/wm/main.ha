@@ -244,7 +244,7 @@ export @symbol("main") fn main() void = {
 		flush();
 		sync();
 		// Frames arrive faster than this loop can drain them, so give the
-		// game and the shell a turn every time rather than after eight
+		// drawing program and the shell a turn every time rather than after eight
 		// expensive repaints.
 		rt::cop();
 	};

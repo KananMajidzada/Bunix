@@ -39,9 +39,9 @@ def MENUSEL: u32 = 0x3B3B3B;
 
 def MI: size = 6;
 def IH: size = 20;
-// The size a drawing window starts at: the game's own picture, one pixel of
-// it to one pixel of the window, with nothing scaled until the player asks
-// for more window than that.
+// The size a drawing window starts at: the program's own picture, one pixel of
+// it to one pixel of the window, with nothing scaled until the user asks for
+// more window than that.
 def GDEFW: size = 640;
 def GDEFH: size = 400;
 
@@ -294,11 +294,11 @@ fn drawn(wi: size) rect = {
 //
 // A drawing window belongs to a program that asked for one by writing its
 // name to /dev/win: it is a rectangle of pixels rather than a grid of text,
-// sized to whatever the program reports it draws, and the program paints it
-// by writing /dev/fb. Kit keeps the last frame the program wrote so the
-// window can be repainted whenever something is drawn over or moved across
-// it, which is what lets a game and the desktop share the screen without
-// either leaving marks on the other.
+// sized to whatever the program reports it draws. The program paints it by
+// writing /dev/fb or straight into a mapped surface; Kit keeps the last
+// picture it showed so the window can be repainted whenever something is
+// drawn over or moved across it, which is what lets a drawing program and the
+// desktop share the screen without either leaving marks on the other.
 
 // The window's title, as the title bar draws it. A text window is a terminal;
 // a drawing window is called whatever its program named it.
@@ -430,7 +430,7 @@ fn over_content(wi: size, x: size, y: size) bool = {
 // Shows the picture now in the window: the pixels go into the shadow, then
 // whatever the desktop drew over them afterwards is put back on top of them.
 // The finished picture reaches the card in one write, so the pointer and any
-// window above the game are never briefly missing.
+// window above the picture are never briefly missing.
 fn show(wi: size) void = {
 	if (wins[wi].hidden || wins[wi].gbuf == 0) {
 		return;
@@ -468,10 +468,10 @@ fn show(wi: size) void = {
 		draw_menu();
 	};
 	draw_pointer();
-	// Nothing outside this rectangle changed: the game paints only its own
-	// picture, and anything that did move outside it marks a full repaint.
-	// Presenting just the picture keeps VRAM writes proportional to the game's
-	// window instead of the whole desktop. An open menu can reach outside the
+	// Nothing outside this rectangle changed: the drawing program paints only
+	// its own picture, and anything that did move outside it marks a full
+	// repaint. Presenting just the picture keeps VRAM writes proportional to
+	// the window instead of the whole desktop. An open menu can reach outside the
 	// picture, so that case still presents everything.
 	if (menu_open) {
 		fb::present();
@@ -627,8 +627,8 @@ export fn claim_gfx(name: []u8, id: size, from: size) size = {
 };
 
 // The thread a drawing window was made for has stopped, so the window has
-// nothing left to draw in it and goes: quitting a game leaves the desktop
-// exactly as it was found.
+// nothing left to draw in it and goes: quitting a drawing program leaves the
+// desktop exactly as it was found.
 export fn release_owner(id: size) void = {
 	if (!on) {
 		return;
@@ -893,7 +893,7 @@ fn edge_of(wi: size, x: size, y: size) u8 = {
 	// The right and bottom edges have to stay within the pointer's own
 	// reach, which stops a little short of the screen's edge because the
 	// pointer's art has to stay on it. A window grown over the whole screen
-	// has both of those edges out past that reach, so without this a player
+	// has both of those edges out past that reach, so without this a user
 	// who had filled the screen could not take the window back down again
 	// by the corner they got there with.
 	let rz = wins[wi].wx + wins[wi].ww - EDGE;
@@ -1249,8 +1249,8 @@ fn resize_drag() void = {
 };
 
 // Resizes a drawing window by whole pixels instead of character cells: what
-// counts is how much picture fits, and a game's picture is not a multiple of
-// any letter's width. The frame keeps its frame, the opposite edges stay put,
+// counts is how much picture fits, and a program's picture need not be a
+// multiple of any letter's width. The frame keeps its frame, the opposite edges stay put,
 // and the picture is made to fit whatever is left.
 fn resize_gfx(wi: size) void = {
 	const bd = ((2 * BORD): int);
@@ -1289,8 +1289,8 @@ fn resize_gfx(wi: size) void = {
 		nwy = ry1 - nwh;
 	};
 	// An edge being dragged stops at the screen's own edge, so a window can
-	// be grown until it fills the screen - that is how a player asks for a
-	// full screen of a game: there is no other way, and none needed. The
+	// be grown until it fills the screen - that is how the user asks for a
+	// drawing program to fill it: there is no other way, and none needed. The
 	// pointer itself stops a little short of the edge - its art has to stay
 	// on the screen - so once it has been pushed out as far as it goes, the
 	// window's edge goes the rest of the way and lands on the screen's.
@@ -1385,8 +1385,8 @@ fn menu_activate(sel: int) void = {
 		goy = my - wins[wi].wy;
 	} else if (sel == 3) {
 		// A graphic window belongs to a running program. Deleting it
-		// without ending that program would leave a game playing in a
-		// window nobody can see.
+		// without ending that program would leave it drawing in a window
+		// nobody can see.
 		if (wi != NONE && wins[wi].used && wins[wi].graphic) {
 			const owner = wins[wi].owner;
 			delete_window(wi);
@@ -1473,7 +1473,7 @@ export fn mouse(dx: int, dy: int, btn: u8) route = {
 	};
 	// A button pressed on the picture stays the program's until it comes up,
 	// so the release always reaches the program even if the pointer has left
-	// the window by then: losing it would leave the game firing forever.
+	// the window by then: losing it would leave the program's button stuck.
 	let app = here;
 	if (here) {
 		appbtn = btn;
@@ -1640,7 +1640,7 @@ fn clear_window(wi: size) void = {
 
 // Draws one cell of a window into the shadow and marks the window for one
 // present at the end of the manager's turn. A printed line used to push every
-// cell onto the card as it was written, which fought with game frames for the
+// cell onto the card as it was written, which fought with drawing frames for the
 // screen and left the pointer blinking.
 fn put_cell(wi: size, li: size, col: size, cursor: bool) void = {
 	if (li < wins[wi].top || li >= wins[wi].top + wins[wi].rows) {
@@ -1779,8 +1779,8 @@ export fn screen_cols() size = {
 };
 
 // Draws any terminal output written since the last frame. The window is
-// painted in the desktop's z order: an old terminal behind a game must not
-// drop its text over the game until the next frame arrives.
+// painted in the desktop's z order: an old terminal behind a drawing window
+// must not drop its text over the picture until the next frame arrives.
 export fn sync() void = {
 	if (dirty_win != NONE) {
 		repaint();

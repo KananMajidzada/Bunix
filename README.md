@@ -272,15 +272,16 @@ requires `curl` and an internet connection on the host. The downloaded file is
 reused on later builds unless `make clean` removes it. Controls are keyboard
 only.
 
-	ush> cd /Doom
+	ush> cd /apps/doom
 	ush> ls
 	doom1.wad  doom
 	ush> doom
 
-`/Doom/doom` works from anywhere too. Everything is a file: the window is
+`/apps/doom/doom` works from anywhere too. Everything is a file: the window is
 `/dev/win`, the keys arrive on `/dev/kbd`, the framebuffer it draws on is
 `/dev/fb`, and the sound effects are written to `/dev/audio` — DOOM is just a
-program reading and writing files. The game mixes its own samples against the
+program reading and writing files. `fbtest` uses the same window and flip files,
+without knowing anything about games. The game mixes its own samples against the
 clock it runs on, so a shot is heard when it happens. Music is still quiet,
 sorry: those lumps are MIDI for an OPL chip, not samples. When you quit from
 the game's menu the process really ends and you get your `ush>` back; deleting

@@ -169,8 +169,10 @@ screen to the shell instead of leaving the last frame on it.
 A drawing program can share frames with the manager instead of sending pixels
 through a file. The manager makes a surface the size of the screen with system
 call 28, maps it with 29, and gives the program its id in the fourth word of
-`/dev/gfxreply` and the third number of `/dev/win`. The program maps the same
-frames with 29, writes pixels straight into them, and rings `/dev/flip` with
+`/dev/gfxreply` and the third number of `/dev/win`. `bunix_win_map()` in the
+program runtime asks for the window, maps that id, and hands the program a
+pixel pointer and a surface id, with `/dev/fb` left as the fallback. The program
+writes pixels straight into them, and rings `/dev/flip` with
 the id when a frame is ready. The manager reads the id and a sequence number,
 composites that surface into its shadow, and presents the picture's rectangle
 to the device in one write. A flip already composes the overlays that sit on
@@ -439,19 +441,20 @@ that program's problem, and is handled by killing it.
 Done also: sound as a file. A Sound Blaster 16 is found and driven through
 `/dev/audio` and `/dev/audioctl`, with a ring buffer and interrupt-driven DMA
 in the kernel, and `tone` plays through it. The `vol` command sets a system
-volume applied for every program. Doom uses the same files for its effects, so
-a game needs nothing of the card that any other program does not have. Quitting
-it from its menu calls `exit`, which reaps the process, frees its window and
+volume applied for every program. Doom uses the same files for its effects, but
+it needs nothing of the card that any other program does not have. Quitting a
+drawing program calls `exit`, which reaps the process, frees its window and
 stops its sound; deleting its drawing window from the desktop does the same.
-Either way the shell prompt comes back and no game is left running unseen.
+Either way the shell prompt comes back and no program is left running unseen.
 
 Done also: namespaces can weave in trees of their own, and services can post
 names in the dock for others to weave. The shell commands do the same work any
 program can do through `/dev/weave` and `/dev/dockctl`, and both kinds of name
-are released with the process that made them. Doom draws through a shared
-surface: the manager maps the frames, the game writes into them and rings
-`/dev/flip`, and the manager composes the finished picture without copying it
-across a system call.
+are released with the process that made them. Any drawing program can take a
+shared surface: `bunix_win_map()` asks for a window, maps the frames and hands
+back the surface id; the program writes pixels into them and rings `/dev/flip`,
+and the manager composes the finished picture without copying it across a
+system call. Doom and `fbtest` both use that one path.
 
 Started: the port environment. A POSIX shim in userspace gives the user program
 `open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
@@ -476,7 +479,8 @@ Next: a C compiler driver for the port environment.
    [done]
 10. Output redirection. [done]
 11. A pipe, as a file. [done]
-12. Sound as a file, with a Sound Blaster 16 behind it and Doom using it.
+12. Sound as a file, with a Sound Blaster 16 behind it and drawing programs
+    using it.
     [done; music not yet]
 13. Private grafts and a service dock reached through control files. [done]
 14. Shared drawing surfaces with a flip doorbell for programs that draw.

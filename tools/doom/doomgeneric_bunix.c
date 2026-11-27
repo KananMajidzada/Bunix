@@ -3,7 +3,7 @@
 // Everything the game needs from the machine arrives as files, the same ones
 // any program that draws rather than types uses: the screen is /dev/fb, the
 // keyboard /dev/kbd, the clock /proc/millis, and the game's data file is
-// /Doom/doom1.wad in the filesystem like any other file. Four functions tie
+// /apps/doom/doom1.wad in the filesystem like any other file. Four functions tie
 // the two together: the frame the game renders is put into the window, key
 // edges are translated into DOOM's own codes, and the clock paces the game.
 //
@@ -99,15 +99,12 @@ void DG_Init(void) {
         exit(1);
     }
     alloc_picture(fw, fh);
-    if (bunix_win_open("doom", &w, &h) == 0) {
+    if (bunix_win_map("doom", &w, &h, &shared, &surface) == 0) {
         // A window of the desktop: its picture is the game's screen, and the
         // desktop paints everything around it. Nothing of the screen needs
-        // saving, because the game never draws outside the window.
+        // saving, because the game never draws outside the window. The shared
+        // mapping is optional; without it the same window takes /dev/fb writes.
         windowed = 1;
-        surface = bunix_win_surface();
-        if (surface != 0) {
-            shared = bunix_surface_map(surface);
-        }
         size_picture(w, h);
         return;
     }
@@ -267,7 +264,7 @@ int main(int argc, char **argv) {
     }
     if (!have_iwad) {
         args[n++] = (char *)"-iwad";
-        args[n++] = (char *)"/Doom/doom1.wad";
+        args[n++] = (char *)"/apps/doom/doom1.wad";
     }
     doomgeneric_Create(n, args);
     for (;;) {
