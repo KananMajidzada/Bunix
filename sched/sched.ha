@@ -110,6 +110,7 @@ fn cleanup(id: size) void = {
 	};
 	threads[id].cleaned = true;
 	free_user(id);
+	clear_input(id);
 	// A drawing session made for this thread has nothing left to draw into it,
 	// so it goes the way the thread does. Whoever manages surfaces for the
 	// session hears about it here, however the thread ended.
@@ -269,12 +270,24 @@ fn pop_input() u8 = {
 	return b;
 };
 
-// Files a byte just read from the keyboard against the focused session's thread
-// and returns whatever is waiting for the caller.
-export fn deliver(b: u8) u8 = {
+// The thread the keyboard belongs to right now. The keyboard records this
+// when a key arrives, so a program that only reads key edges cannot leave its
+// typing behind for whoever gets the keyboard next.
+export fn focus_thread() size = return input_thread();
+
+// Files a byte against the thread that owned the keyboard when its key came
+// in. The byte may be made later, when a reader turns a scancode into a letter.
+export fn queue_input_to(t: size, b: u8) void = {
 	if (b != 0) {
-		push_input(input_thread(), b);
+		push_input(t, b);
 	};
+};
+
+// Returns the next byte addressed to the calling thread. Input was filed when
+// it arrived, not now: a program that reads only key edges must not leave its
+// typing behind for whatever gets the keyboard next.
+export fn deliver(b: u8) u8 = {
+	_ = b;
 	return pop_input();
 };
 

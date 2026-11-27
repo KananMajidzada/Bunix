@@ -1,5 +1,6 @@
 use architecture;
 use session;
+use sched;
 use rt;
 
 let lastbtn: u8 = 0;
@@ -153,10 +154,15 @@ export fn poll_mouse() void = {
 	in_poll = false;
 };
 
-// Returns one byte, or zero when nothing is waiting.
+// Returns one byte for a program that is reading characters, or zero when
+// nothing is waiting. A PS/2 scancode is filed against the thread that owned
+// the keyboard when it arrived; a byte from the serial terminal is filed here,
+// since that is the only moment its owner is known.
 export fn pollch() u8 = {
 	if (serial_has_data()) {
-		return serial_getc();
+		const b = serial_getc();
+		sched::queue_input_to(sched::focus_thread(), b);
+		return b;
 	};
 	if (keyboard_has_data()) {
 		return keyboard_getc();

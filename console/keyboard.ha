@@ -1,4 +1,5 @@
 use architecture;
+use sched;
 
 // Scan code set 1. Non-printing keys map to zero.
 const unshifted: [128]u8 = [
@@ -55,10 +56,18 @@ let q: [SEQ]u8 = [0...];
 let qhead: size = 0;
 let qtail: size = 0;
 let qn: size = 0;
+// The thread that owned the keyboard when the scancode now being turned into
+// characters arrived. A game reads key edges instead of characters, so without
+// this the shell would receive its typing when the game let go of the keyboard.
+let keyowner: size = 0;
 // Set by the E0 that prefixes the second scancode of an extended key.
 let ext = false;
 
 fn qput(b: u8) void = {
+	// File the byte against the owner before anything else: the character
+	// ring can fill up while a drawing program has the keyboard, but the
+	// program that owned those keys must still be the one to receive them.
+	sched::queue_input_to(keyowner, b);
 	if (qn == SEQ) {
 		return;
 	};
@@ -110,14 +119,21 @@ fn take_hw() u8 = {
 
 // Takes one scancode for the character reader: the ring first, since the
 // interrupt has been putting them there, and the controller only when the ring
-// is empty and interrupts are masked.
+// is empty and interrupts are masked. Scancodes from the ring have already
+// been turned into characters; one taken here straight from the controller
+// has not.
+let took_hw = false;
+
 fn take() u8 = {
 	if (rawn > 0) {
 		const sc = raw[rawhead];
 		rawhead = (rawhead + 1) % RAW;
 		rawn -= 1;
+		took_hw = false;
 		return sc;
 	};
+	keyowner = sched::focus_thread();
+	took_hw = true;
 	return take_hw();
 };
 
@@ -188,7 +204,12 @@ fn ingest(sc: u8) void = {
 	raw[rawtail] = sc;
 	rawtail = (rawtail + 1) % RAW;
 	rawn += 1;
+	// The keyboard may be read from an interrupt or polled by a program that
+	// wants key edges. Either way, remember its owner now, before a reader
+	// turns the scancode into a character much later.
+	keyowner = sched::focus_thread();
 	note_event(sc);
+	feed(sc);
 };
 
 export fn keyboard_has_data() bool = {
@@ -287,7 +308,9 @@ fn feed(sc: u8) void = {
 
 export fn keyboard_getc() u8 = {
 	// Bytes already made from earlier scancodes come out first, so an escape
-	// sequence is never split by a key that follows it.
+	// sequence is never split by a key that follows it. Scancodes are turned
+	// into bytes when they arrive, whether through an interrupt or a program
+	// polling for key edges, and filed against the owner at that moment.
 	for (true) {
 		if (qn > 0) {
 			const b = q[qhead];
@@ -299,7 +322,12 @@ export fn keyboard_getc() u8 = {
 		if (sc == 0) {
 			return 0;
 		};
-		feed(sc);
+		// A scancode from the ring was already turned into characters when
+		// it arrived. Only one taken straight from the controller needs it
+		// done here.
+		if (took_hw) {
+			feed(sc);
+		};
 	};
 };
 

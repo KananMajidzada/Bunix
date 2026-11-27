@@ -289,9 +289,9 @@ fn handle(regs: *architecture::registers) uintptr = {
 		regs.rax = redirectpath(regs);
 		return regs: uintptr;
 	case READCHR =>
-		// A keystroke goes to the shell behind the window that has the
-		// focus, so typing into a new terminal is not swallowed by a
-		// program still running in another one.
+		// Input was routed when it arrived, so a program that only reads
+		// key edges cannot leave its typing behind for the shell once it
+		// gives up the keyboard.
 		regs.rax = sched::deliver(console::pollch()): u64;
 		return regs: uintptr;
 	case YIELD =>
