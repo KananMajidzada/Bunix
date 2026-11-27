@@ -224,8 +224,12 @@ DOOM_HDRS = $(wildcard $(DOOM_DIR)/*.h)
 # The game is old C written for other compilers: strict aliasing and the
 # warnings its style would raise are turned off, everything else about the
 # runtime's freestanding setup is kept.
+# The game itself draws 320x200. Doomgeneric used to blow that up to 640x400
+# and our window code then scaled it again, so both buffers held four times
+# the pixels the game really made. Keeping the native size here leaves the one
+# scale into the window, where it belongs.
 DOOM_CFLAGS = -I$(C_RT_DIR) -I$(DOOM_DIR) \
-	-DBUNIX -DFEATURE_SOUND \
+	-DBUNIX -DFEATURE_SOUND -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 \
 	-ffreestanding -nostdlib -fno-pic -fno-pie -fno-builtin \
 	-fno-stack-protector -mno-red-zone -mfpmath=sse -O2 \
 	-fno-strict-aliasing \

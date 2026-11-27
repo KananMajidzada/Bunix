@@ -43,6 +43,7 @@ typedef long ssize_t;
 #define SYS_REDIRECT    24
 #define SYS_PANIC       25
 #define SYS_FAULT       26
+#define SYS_MILLIS      27
 
 #define BUNIX_PANIC_MAGIC 0x42554E49u
 

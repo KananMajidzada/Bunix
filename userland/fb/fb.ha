@@ -156,7 +156,7 @@ export fn present() void = {
 };
 
 export fn present_rect(x: size, y: size, w: size, h: size) void = {
-	if (shadow == 0 || x >= fbw || y >= fbh) {
+	if (shadow == 0 || x >= fbw || y >= fbh || w == 0 || h == 0) {
 		return;
 	};
 	let ww = w;
@@ -167,8 +167,14 @@ export fn present_rect(x: size, y: size, w: size, h: size) void = {
 	if (y + hh > fbh) {
 		hh = fbh - y;
 	};
-	for (let j = 0z; j < hh; j += 1) {
-		const at = (y + j) * pitch + x * 4;
-		_ = rt::writeat("/dev/fbpresent", bytes(shadow + at, ww * 4), at: u64);
+	const at = y * pitch + x * 4;
+	// The shadow is tightly packed, so a rectangle is one run of bytes from
+	// its first pixel to the end of its last row. Writing it in one call
+	// keeps the card from ever seeing a frame that is only half there, and
+	// avoids a system call for every single row.
+	const count = (ww * 4) + ((hh - 1) * pitch);
+	if (at + count > pitch * fbh) {
+		return;
 	};
+	_ = rt::writeat("/dev/fbpresent", bytes(shadow + at, count), at: u64);
 };

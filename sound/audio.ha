@@ -47,6 +47,9 @@ let active: bool = false;
 let owner: size = sched::NOID;
 let blocks: u64 = 0;
 let irqs: u64 = 0;
+// How often a writer had to wait for the card. It is useful when a game feels
+// slow: a writer that never waits is not the reason the frame rate dropped.
+let stalls: u64 = 0;
 
 export fn audio_present() bool = present();
 export fn audio_irq_line() u8 = irq();
@@ -60,10 +63,17 @@ fn frame_size() size = {
 };
 
 fn fifo_put(data: []u8, n: size) void = {
-	for (let i = 0z; i < n; i += 1) {
-		fifo[ftail] = data[i];
-		ftail = (ftail + 1) % FIFO_SZ;
+	let first = n;
+	if (first > FIFO_SZ - ftail) {
+		first = FIFO_SZ - ftail;
 	};
+	architecture::memcpy((&fifo[ftail]: uintptr),
+			(&data[0]: uintptr), first);
+	if (first < n) {
+		architecture::memcpy((&fifo[0]: uintptr),
+				(&data[first]: uintptr), n - first);
+	};
+	ftail = (ftail + n) % FIFO_SZ;
 	fcount += n;
 };
 
@@ -99,10 +109,19 @@ fn apply_volume(n: size) void = {
 // help, so nothing may touch it until the interrupt says the block is
 // over.
 fn fifo_take(n: size) void = {
-	for (let i = 0z; i < n; i += 1) {
-		*((DMA_BUF + i): *u8) = fifo[fhead];
-		fhead = (fhead + 1) % FIFO_SZ;
+	// The ring wraps at most once. Moving a whole block with the machine's
+	// copy keeps the interrupt short: this runs every time the card finishes
+	// a block, while the rest of the machine is waiting.
+	let first = n;
+	if (first > FIFO_SZ - fhead) {
+		first = FIFO_SZ - fhead;
 	};
+	architecture::memcpy(DMA_BUF: uintptr, (&fifo[fhead]: uintptr), first);
+	if (first < n) {
+		architecture::memcpy((DMA_BUF + first): uintptr,
+				(&fifo[0]: uintptr), n - first);
+	};
+	fhead = (fhead + n) % FIFO_SZ;
 	fcount -= n;
 	apply_volume(n);
 };
@@ -208,6 +227,7 @@ export fn audio_write(data: []u8, off: u64) size = {
 		architecture::sti();
 		const until = architecture::millis() + 1;
 		for (architecture::millis() < until) void;
+		stalls += 1;
 		stalled += 1;
 		if (stalled > 1000) {
 			// Ten seconds without the card coming back. Keeping the
@@ -398,6 +418,8 @@ export fn audio_status(buf: []u8) size = {
 	k += put_num(buf[k..], len(buf) - k, irqs);
 	k += put_str(buf[k..], len(buf) - k, " queued ");
 	k += put_num(buf[k..], len(buf) - k, fcount: u64);
+	k += put_str(buf[k..], len(buf) - k, " stalls ");
+	k += put_num(buf[k..], len(buf) - k, stalls);
 	k += put_str(buf[k..], len(buf) - k, " volume ");
 	k += put_num(buf[k..], len(buf) - k, volume: u64);
 	k += put_str(buf[k..], len(buf) - k, "\n");

@@ -385,10 +385,9 @@ fn over_content(wi: size, x: size, y: size) bool = {
 };
 
 // Shows the picture now in the window: the pixels go into the shadow, then
-// whatever the desktop drew over them afterwards is put back on top of them,
-// and only the rectangles that really changed reach the card. The program
-// writes a frame sixty times a second, and none of that may spill onto a
-// terminal sitting over the window.
+// whatever the desktop drew over them afterwards is put back on top of them.
+// The finished picture reaches the card in one write, so the pointer and any
+// window above the game are never briefly missing.
 fn show(wi: size) void = {
 	if (wins[wi].hidden || wins[wi].gbuf == 0) {
 		return;
@@ -398,7 +397,6 @@ fn show(wi: size) void = {
 	const cw = wins[wi].gw;
 	const ch = wins[wi].gh;
 	fb::blit(cx, cy, cw, ch, wins[wi].gbuf, cw * 4);
-	fb::present_rect(cx, cy, cw, ch);
 	// Windows raised above this one were drawn over the picture in z order,
 	// so they go back in the same order and still come out on top.
 	let zi = 0z;
@@ -419,17 +417,15 @@ fn show(wi: size) void = {
 				continue;
 			};
 			draw_window(wj);
-			fb::present_rect(r.x, r.y, r.w, r.h);
 		};
 	};
 	// The menu and the pointer are above everything, and were possibly under
 	// the frame just shown.
 	if (menu_open) {
 		draw_menu();
-		fb::present_rect(menu_x, menu_y, menu_w(), menu_h());
 	};
 	draw_pointer();
-	fb::present_rect(mx, my, PW, PH);
+	fb::present();
 };
 
 // Puts a frame the program wrote into its window. The pixels are packed
@@ -745,18 +741,6 @@ fn draw_pointer() void = {
 			};
 		};
 	};
-};
-
-// Repaints one window into the shadow and presents only that rectangle. The
-// desktop and every other window are already correct in the shadow, so there is
-// nothing to redraw and nothing to copy.
-fn repaint_win(wi: size) void = {
-	if (wi == NONE || !wins[wi].used) {
-		return;
-	};
-	hover = hovered();
-	draw_window(wi);
-	fb::present_rect(wins[wi].wx, wins[wi].wy, wins[wi].ww, wins[wi].wh);
 };
 
 // Repaints the desktop into the shadow and presents one whole frame.
@@ -1578,9 +1562,10 @@ fn clear_window(wi: size) void = {
 	wins[wi].total = 1;
 };
 
-// Draws one cell of a window into the shadow and pushes only that cell onto
-// the card. A character shows up the moment it is written, the way a terminal
-// shows it, without copying the whole screen for every letter.
+// Draws one cell of a window into the shadow and marks the window for one
+// present at the end of the manager's turn. A printed line used to push every
+// cell onto the card as it was written, which fought with game frames for the
+// screen and left the pointer blinking.
 fn put_cell(wi: size, li: size, col: size, cursor: bool) void = {
 	if (li < wins[wi].top || li >= wins[wi].top + wins[wi].rows) {
 		return;
@@ -1596,7 +1581,7 @@ fn put_cell(wi: size, li: size, col: size, cursor: bool) void = {
 	} else {
 		fb::cell(x, y, ch, fb::BLACK, fb::WHITE);
 	};
-	fb::present_rect(x, y, fb::CW, fb::CH);
+	dirty_win = wi;
 };
 
 // Where the cursor block is currently painted, so it can be lifted off the
@@ -1717,14 +1702,12 @@ export fn screen_cols() size = {
 	return wins[focus].cols;
 };
 
-// Draws any terminal output written since the last frame. The kernel calls this
-// once per scheduling slice, so a program that prints a whole line pays for one
-// repaint rather than one per character.
+// Draws any terminal output written since the last frame. The window is
+// painted in the desktop's z order: an old terminal behind a game must not
+// drop its text over the game until the next frame arrives.
 export fn sync() void = {
 	if (dirty_win != NONE) {
-		const wi = dirty_win;
-		dirty_win = NONE;
-		repaint_win(wi);
+		repaint();
 	};
 };
 

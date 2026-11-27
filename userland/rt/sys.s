@@ -162,6 +162,12 @@ rt.sys_fault:
 	int $0x80
 	ret
 
+.global rt.sys_millis
+rt.sys_millis:
+	movq $27, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

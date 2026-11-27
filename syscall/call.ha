@@ -2,7 +2,7 @@ use architecture;
 use console;
 use debug;
 use fs;
-use wm;
+use session;
 use loader;
 use rt;
 use sched;
@@ -34,6 +34,7 @@ export def WRITEAT: u64 = 23;
 export def REDIRECT: u64 = 24;
 export def PANIC: u64 = 25;
 export def FAULT: u64 = 26;
+export def MILLIS: u64 = 27;
 
 // A program cannot stop the machine by accident. The two diagnostic calls
 // need a word in the register as well as the call number.
@@ -326,7 +327,7 @@ fn handle(regs: *architecture::registers) uintptr = {
 		regs.rax = if (sched::alive(regs.rdi: size)) 1 else 0;
 		return regs: uintptr;
 	case FRESH =>
-		regs.rax = if (wm::take_fresh()) 1 else 0;
+		regs.rax = if (session::take_fresh()) 1 else 0;
 		return regs: uintptr;
 	case CHDIR =>
 		regs.rax = changepath(regs);
@@ -361,6 +362,13 @@ fn handle(regs: *architecture::registers) uintptr = {
 			_ = architecture::probe(0x100000000);
 		};
 		regs.rax = 0;
+		return regs: uintptr;
+	case MILLIS =>
+		// The clock is a file for people, but a game asks for it on
+		// every loop. Reading and parsing a number each time cost more
+		// than the frame itself, so programs can ask for the tick count
+		// straight instead.
+		regs.rax = architecture::millis();
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

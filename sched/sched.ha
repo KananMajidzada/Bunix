@@ -1,5 +1,5 @@
 use architecture;
-use wm;
+use session;
 use mem;
 use paging;
 
@@ -21,10 +21,10 @@ export type thread = struct {
 	heap: uintptr,
 	heap_end: uintptr,
 	fpu: uintptr,
-	// The terminal window this thread's output belongs to. A thread keeps to
-	// the window it was started in, so a program left running in one window
+	// The terminal session this thread's output belongs to. A thread keeps to
+	// the session it was started in, so a program left running in one session
 	// does not paint over another one that is merely being looked at.
-	win: size,
+	ses: size,
 	// The command the thread was started with, so that ps can say what it
 	// is doing.
 	cmd: [64]u8,
@@ -77,7 +77,7 @@ fn thread_fpu(i: size) uintptr = {
 
 let threads: [MAXTHREADS]thread = [thread {
 	id = 0, stack = 0, kernel = 0, frame = 0,
-	space = 0, heap = 0, heap_end = 0, fpu = 0, win = 0,
+	space = 0, heap = 0, heap_end = 0, fpu = 0, ses = 0,
 	cmd = [0...], cmdlen = 0, alive = false, cleaned = false,
 	redir = [0...], redirlen = 0, rediroff = 0,
 }...];
@@ -110,7 +110,7 @@ fn cleanup(id: size) void = {
 	};
 	threads[id].cleaned = true;
 	free_user(id);
-	// A drawing window made for this thread has nothing left to draw into it,
+	// A drawing session made for this thread has nothing left to draw into it,
 	// so it goes the way the thread does.
 	gfxof[id] = false;
 	reap(threads[id].id: size);
@@ -137,7 +137,7 @@ export fn start() void = {
 	threads[0] = thread {
 		id = 0, stack = 0, kernel = 0, frame = 0,
 		space = 0, heap = 0, heap_end = 0,
-		fpu = thread_fpu(0), win = 0,
+		fpu = thread_fpu(0), ses = 0,
 		cmd = [0...], cmdlen = 0, alive = true, cleaned = false,
 		redir = [0...], redirlen = 0, rediroff = 0,
 	};
@@ -145,27 +145,27 @@ export fn start() void = {
 	current = 0;
 };
 
-// Points a thread that has just been created at a particular window, for a
+// Points a thread that has just been created at a particular session, for a
 // shell started to serve a newly opened terminal.
-export fn bind_win(id: size, wi: size) void = {
+export fn bind_session(id: size, wi: size) void = {
 	if (id == NOID || id >= MAXTHREADS) {
 		return;
 	};
-	// The thread was entered in the window of whoever started it, which is
-	// not the window it is being sent to. Leaving the foreground record
-	// pointing at it would make that window hand its keystrokes to a
+	// The thread was entered in the session of whoever started it, which is
+	// not the session it is being sent to. Leaving the foreground record
+	// pointing at it would make that session hand its keystrokes to a
 	// process belonging to another one.
-	const old = threads[id].win;
-	threads[id].win = wi;
-	if (old < MAXWIN && win_fg[old] == id) {
-		win_fg[old] = MAXWIN;
+	const old = threads[id].ses;
+	threads[id].ses = wi;
+	if (old < MAXSES && ses_fg[old] == id) {
+		ses_fg[old] = MAXSES;
 	};
-	if (wi < MAXWIN) {
-		win_fg[wi] = id;
+	if (wi < MAXSES) {
+		ses_fg[wi] = id;
 	};
 };
 
-// Keystrokes waiting for each thread. Every terminal window has a shell of its
+// Keystrokes waiting for each thread. Every terminal session has a shell of its
 // own, and they all read the same keyboard, so a byte has to be filed against
 // the thread that is meant to receive it rather than handed to whichever one the
 // scheduler happens to be running.
@@ -175,64 +175,64 @@ let inhead: [MAXTHREADS]size = [0...];
 let intail: [MAXTHREADS]size = [0...];
 let incount: [MAXTHREADS]size = [0...];
 
-// The thread a window is showing: the one most recently started in it and still
-// running. A shell and the program it started share a window, and the program
+// The thread a session is showing: the one most recently started in it and still
+// running. A shell and the program it started share a session, and the program
 // is the one that must read the keyboard, exactly as a terminal hands input to
-// the foreground job rather than to the shell behind it. NONE means the window
+// the foreground job rather than to the shell behind it. NONE means the session
 // has no job of its own, and the shell behind it takes the input.
-def MAXWIN: size = 6;
-let win_fg: [MAXWIN]size = [MAXWIN...];
+def MAXSES: size = 6;
+let ses_fg: [MAXSES]size = [MAXSES...];
 
-// The shell behind each window. A window's foreground job may come and go, and
+// The shell behind each session. A session's foreground job may come and go, and
 // when it does the keystrokes have to go back to the shell that owns the
-// window rather than to whichever thread happens to come first: the kernel's
+// session rather than to whichever thread happens to come first: the kernel's
 // own first process is a monitor that never reads the keyboard, and it is the
-// first live thread in the window the boot shell runs in.
-let win_shell: [MAXWIN]size = [MAXWIN...];
+// first live thread in the session the boot shell runs in.
+let ses_shell: [MAXSES]size = [MAXSES...];
 
-// The threads that draw into a window of their own. Once such a thread has
-// asked for a drawing window its writes to /dev/fb never fall back to the
-// screen: if the window is gone the writes land nowhere, rather than a
-// program that lost its window taking the display over behind the desktop's
+// The threads that draw into a session of their own. Once such a thread has
+// asked for a drawing session its writes to /dev/fb never fall back to the
+// screen: if the session is gone the writes land nowhere, rather than a
+// program that lost its session taking the display over behind the desktop's
 // back.
 let gfxof: [MAXTHREADS]bool = [false...];
 
-// Remembers that a thread now draws into a window of its own.
+// Remembers that a thread now draws into a session of its own.
 export fn set_gfx(id: size, v: bool) void = {
 	if (id < MAXTHREADS) {
 		gfxof[id] = v;
 	};
 };
 
-// Whether a thread is one that draws into a window rather than at the screen.
+// Whether a thread is one that draws into a session rather than at the screen.
 export fn is_gfx(id: size) bool = {
 	return id < MAXTHREADS && gfxof[id];
 };
 
-// The window the next thread started belongs to. MAXWIN means "the window of
+// The session the next thread started belongs to. MAXSES means "the session of
 // whoever is starting it", which is right for a program a shell runs.
-let spawn_win: size = MAXWIN;
+let spawn_ses: size = MAXSES;
 
-// Names the window a process about to be started should belong to.
-export fn set_spawn_win(wi: size) void = {
-	spawn_win = wi;
+// Names the session a process about to be started should belong to.
+export fn set_spawn_ses(wi: size) void = {
+	spawn_ses = wi;
 };
 
 fn input_thread() size = {
-	const wi = wm::focus_win();
-	if (wi < MAXWIN) {
-		const fg = win_fg[wi];
-		if (fg != MAXWIN && fg < MAXTHREADS && threads[fg].alive
-				&& threads[fg].win == wi) {
+	const wi = session::focus();
+	if (wi < MAXSES) {
+		const fg = ses_fg[wi];
+		if (fg != MAXSES && fg < MAXTHREADS && threads[fg].alive
+				&& threads[fg].ses == wi) {
 			return fg;
 		};
-		const sh = win_shell[wi];
-		if (sh != MAXWIN && sh < MAXTHREADS && threads[sh].alive
-				&& threads[sh].win == wi) {
+		const sh = ses_shell[wi];
+		if (sh != MAXSES && sh < MAXTHREADS && threads[sh].alive
+				&& threads[sh].ses == wi) {
 			return sh;
 		};
 		for (let i = 0z; i < nthreads; i += 1) {
-			if (threads[i].alive && threads[i].win == wi) {
+			if (threads[i].alive && threads[i].ses == wi) {
 				return i;
 			};
 		};
@@ -240,11 +240,11 @@ fn input_thread() size = {
 	return current;
 };
 
-// Records which shell owns a window, so a window with nothing running in it
+// Records which shell owns a session, so a session with nothing running in it
 // still has somewhere to put keystrokes.
 export fn bind_shell(id: size, wi: size) void = {
-	if (wi < MAXWIN && id != NOID && id < MAXTHREADS) {
-		win_shell[wi] = id;
+	if (wi < MAXSES && id != NOID && id < MAXTHREADS) {
+		ses_shell[wi] = id;
 	};
 };
 
@@ -267,7 +267,7 @@ fn pop_input() u8 = {
 	return b;
 };
 
-// Files a byte just read from the keyboard against the focused window's thread
+// Files a byte just read from the keyboard against the focused session's thread
 // and returns whatever is waiting for the caller.
 export fn deliver(b: u8) u8 = {
 	if (b != 0) {
@@ -424,15 +424,15 @@ export fn live() size = {
 
 export fn running() u64 = threads[current].id;
 
-export fn current_win() size = threads[current].win;
+export fn current_session() size = threads[current].ses;
 
 export fn alive(id: size) bool = id < nthreads && threads[id].alive;
 
 export fn retire() void = {
-	const wi = threads[current].win;
+	const wi = threads[current].ses;
 	threads[current].alive = false;
-	if (wi < MAXWIN && win_fg[wi] == current) {
-		win_fg[wi] = MAXWIN;
+	if (wi < MAXSES && ses_fg[wi] == current) {
+		ses_fg[wi] = MAXSES;
 	};
 	cleanup(current);
 };
@@ -473,11 +473,11 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 	};
 	architecture::fpu_init(save);
 	// A thread started on behalf of a particular terminal belongs to that
-	// terminal, not to the window of whichever process happened to ask for
+	// terminal, not to the session of whichever process happened to ask for
 	// it. Setting this before starting the process matters: the very first
 	// thing a new shell prints is its banner, and it must not land in the
-	// window it was opened over.
-	const w = if (spawn_win < MAXWIN) spawn_win else threads[current].win;
+	// session it was opened over.
+	const w = if (spawn_ses < MAXSES) spawn_ses else threads[current].ses;
 	threads[id] = thread {
 		id = id: u64,
 		stack = stack,
@@ -487,7 +487,7 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		heap = 0,
 		heap_end = 0,
 		fpu = save,
-		win = w,
+		ses = w,
 		cmd = [0...],
 		cmdlen = 0,
 		alive = true,
@@ -496,10 +496,10 @@ fn enter(id: size, stack: uintptr, fp: uintptr, space: uintptr) void = {
 		redirlen = 0,
 		rediroff = 0,
 	};
-	if (w < MAXWIN) {
-		win_fg[w] = id;
+	if (w < MAXSES) {
+		ses_fg[w] = id;
 	};
-	spawn_win = MAXWIN;
+	spawn_ses = MAXSES;
 	fpuready[id] = true;
 };
 
@@ -559,7 +559,7 @@ export fn spawn_user(
 };
 
 // Hands out user memory for the running process, mapping fresh frames into its
-// window and returning the user virtual address.
+// session and returning the user virtual address.
 export fn user_alloc(pages: u64) uintptr = {
 	const t = &threads[current];
 	if (t.space == 0 || pages == 0) {
@@ -598,8 +598,8 @@ fn pick_next() uintptr = {
 		};
 	};
 	current = next;
-	// Output follows the running thread into its own window.
-	wm::set_out(threads[current].win);
+	// Output follows the running thread into its own session.
+	session::set_target(threads[current].ses);
 	if (fpuready[current]) {
 		architecture::fpu_load(threads[current].fpu);
 	};

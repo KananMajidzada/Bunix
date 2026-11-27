@@ -2,7 +2,8 @@ use architecture;
 use block;
 use console;
 use fb;
-use wm;
+use session;
+use gfx;
 use mem;
 use paging;
 use rt;
@@ -23,7 +24,7 @@ def MAXNS: size = 8;
 def BUFSZ: size = 4096;
 def NOCHILD: size = ~0z;
 // No drawing window, as the window manager answers a program that has none.
-def NOWIN: size = ~0z;
+def NOSESSION: size = ~0z;
 
 export type node = struct {
 	nam: [32]u8,
@@ -424,7 +425,7 @@ fn gen_millis(buf: []u8) size = {
 fn gen_fbgeom(buf: []u8) size = {
 	let w: size = 0;
 	let h: size = 0;
-	wm::dims(&w, &h);
+	gfx::dims(&w, &h);
 	if (w == 0 || h == 0) {
 		fb::dev_dims(&w, &h);
 	};
@@ -622,9 +623,9 @@ fn mouse_read(buf: []u8, off: u64, n: size) size = {
 // writes at the screen itself.
 fn fb_write(data: []u8, off: u64) size = {
 	if (sched::is_gfx(sched::current_id())) {
-		const wi = sched::current_win();
-		if (wi != NOWIN) {
-			return wm::frame_write(wi, off, data);
+		const wi = sched::current_session();
+		if (wi != NOSESSION) {
+			return gfx::frame_write(wi, off, data);
 		};
 		return 0;
 	};
@@ -653,7 +654,7 @@ fn win_read(buf: []u8, off: u64, n: size) size = {
 	};
 	let w = 0z;
 	let h = 0z;
-	wm::dims(&w, &h);
+	gfx::dims(&w, &h);
 	let k = put_num(buf, w: u64);
 	buf[k] = ' ': u8;
 	k += 1;
@@ -672,7 +673,7 @@ fn win_write(data: []u8, off: u64) size = {
 	// the pointer, while its own output carries on going to the terminal it
 	// was started in.
 	const id = sched::current_id();
-	const from = wm::out_target();
+	const from = session::target();
 	let name = len(data);
 	if (name > 32) {
 		name = 32;
@@ -684,42 +685,42 @@ fn win_write(data: []u8, off: u64) size = {
 	};
 	req[1 + name] = id: u8;
 	req[2 + name] = from: u8;
-	wm::req_write(req[..3 + name], 0);
+	gfx::req_write(req[..3 + name], 0);
 
 	// The manager is another process, so let the clock run while it draws
 	// the window and answers with its size.
 	architecture::sti();
-	for (!wm::answered()) {
+	for (!gfx::answered()) {
 		architecture::pause();
 	};
 	architecture::cli();
-	const wi = wm::reply_window();
-	if (wi == NOWIN) {
+	const wi = gfx::reply_session();
+	if (wi == NOSESSION) {
 		return 0;
 	};
-	wm::set_out(wi);
-	sched::bind_win(id, wi);
+	session::set_target(wi);
+	sched::bind_session(id, wi);
 	sched::set_gfx(id, true);
 	return len(data);
 };
 
-fn wm_focus_write(data: []u8, off: u64) size = {
+fn session_focus_write(data: []u8, off: u64) size = {
 	_ = off;
 	if (len(data) < 1) {
 		return 0;
 	};
-	wm::set_focus(data[0]: size);
+	session::set_focus(data[0]: size);
 	return len(data);
 };
 
-fn wm_fresh_write(data: []u8, off: u64) size = {
+fn session_fresh_write(data: []u8, off: u64) size = {
 	_ = data;
 	_ = off;
-	wm::set_fresh();
+	session::set_fresh();
 	return 1;
 };
 
-fn wm_dims_write(data: []u8, off: u64) size = {
+fn gfx_dims_write(data: []u8, off: u64) size = {
 	_ = off;
 	if (len(data) < 16) {
 		return 0;
@@ -730,7 +731,7 @@ fn wm_dims_write(data: []u8, off: u64) size = {
 		w |= (data[i]: u64) << ((i * 8): u64);
 		h |= (data[8 + i]: u64) << ((i * 8): u64);
 	};
-	wm::set_dims(w: size, h: size);
+	gfx::set_dims(w: size, h: size);
 	return len(data);
 };
 
@@ -1152,40 +1153,41 @@ export fn init() void = {
 	nodes[winfile].wdsk = &win_write;
 	link(dev, winfile);
 
-	// The window manager is a program now. These are the files it uses to
-	// hear terminal output, take frames from drawing programs, answer window
-	// requests, and tell the kernel where the pointer's keys should go.
-	const wmout = mknode("wmout", false);
-	nodes[wmout].gdsk = &wm::out_read;
-	link(dev, wmout);
+	// A compositor is a program now. These are the generic channels it uses
+	// to hear tagged console output, take frames from drawing programs,
+	// answer surface requests, and name the session that owns the keyboard.
+	// The kernel knows none of the desktop's policy.
+	const sessionout = mknode("sessionout", false);
+	nodes[sessionout].gdsk = &session::out_read;
+	link(dev, sessionout);
 
-	const wmframe = mknode("wmframe", false);
-	nodes[wmframe].gdsk = &wm::frame_read;
-	link(dev, wmframe);
+	const gfxframe = mknode("gfxframe", false);
+	nodes[gfxframe].gdsk = &gfx::frame_read;
+	link(dev, gfxframe);
 
-	const wmreq = mknode("wmreq", false);
-	nodes[wmreq].gdsk = &wm::req_read;
-	link(dev, wmreq);
+	const gfxreq = mknode("gfxreq", false);
+	nodes[gfxreq].gdsk = &gfx::req_read;
+	link(dev, gfxreq);
 
-	const wmreply = mknode("wmreply", false);
-	nodes[wmreply].wdsk = &wm::reply_write;
-	link(dev, wmreply);
+	const gfxreply = mknode("gfxreply", false);
+	nodes[gfxreply].wdsk = &gfx::reply_write;
+	link(dev, gfxreply);
 
-	const wmfocus = mknode("wmfocus", false);
-	nodes[wmfocus].wdsk = &wm_focus_write;
-	link(dev, wmfocus);
+	const sessionfocus = mknode("sessionfocus", false);
+	nodes[sessionfocus].wdsk = &session_focus_write;
+	link(dev, sessionfocus);
 
-	const wmdims = mknode("wmdims", false);
-	nodes[wmdims].wdsk = &wm_dims_write;
-	link(dev, wmdims);
+	const gfxdims = mknode("gfxdims", false);
+	nodes[gfxdims].wdsk = &gfx_dims_write;
+	link(dev, gfxdims);
 
-	const wmfresh = mknode("wmfresh", false);
-	nodes[wmfresh].wdsk = &wm_fresh_write;
-	link(dev, wmfresh);
+	const sessionfresh = mknode("sessionfresh", false);
+	nodes[sessionfresh].wdsk = &session_fresh_write;
+	link(dev, sessionfresh);
 
-	const wmbind = mknode("wmbind", false);
-	nodes[wmbind].wdsk = &wm::bind_shell;
-	link(dev, wmbind);
+	const sessionbind = mknode("sessionbind", false);
+	nodes[sessionbind].wdsk = &session::bind;
+	link(dev, sessionbind);
 
 	// The speaker as a file: a write is a tune and does not come back
 	// until the tune is over. It is the device a program makes music

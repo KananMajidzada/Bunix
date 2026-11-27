@@ -154,13 +154,14 @@ Opening a window makes a fresh shell for it, so a new terminal is ready to type
 in.
 
 The window manager is a user program. It reads the screen's size from
-`/proc/fb`, pixels from `/dev/fb`, pointer edges from `/dev/mouse`, and terminal
-bytes from `/dev/wmout`; it answers window requests through `/dev/wmreq` and
-`/dev/wmreply`, and tells the kernel about focus and sizes through
-`/dev/wmfocus` and `/dev/wmdims`. The kernel keeps only the little it needs for
-routing input and holding the last frame a drawing program sent. There is no
-drawing code or desktop policy left in the kernel - the window system became
-one more file-serving process, as planned.
+`/proc/fb`, pixels from `/dev/gfxframe`, pointer edges from `/dev/mouse`, and
+tagged console bytes from `/dev/sessionout`; it answers drawing-surface
+requests through `/dev/gfxreq` and `/dev/gfxreply`, and publishes focus, dims,
+and shell bindings through `/dev/sessionfocus`, `/dev/gfxdims`, and
+`/dev/sessionbind`. The kernel's `session` and `gfx` modules are only generic
+channels: an opaque number for input/output routing and one holding area for
+the newest frame. They know nothing about windows or desktops, so another
+window manager can use the same files. There is no `wm/` code in the kernel.
 
 ## Audio
 

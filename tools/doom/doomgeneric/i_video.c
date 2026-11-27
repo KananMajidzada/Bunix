@@ -31,6 +31,7 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 #include "d_event.h"
 #include "d_main.h"
 #include "i_video.h"
+#include "i_timer.h"
 #include "i_system.h"
 #include "z_zone.h"
 
@@ -318,11 +319,22 @@ void I_UpdateNoBlit (void)
 // I_FinishUpdate
 //
 
+static int drawn_tic = -1;
+
 void I_FinishUpdate (void)
 {
     int y;
     int x_offset, y_offset, x_offset_end;
     unsigned char *line_in, *line_out;
+
+    // The game thinks in 35 Hz tics but the main loop calls this on every
+    // pass. Drawing the same picture again twice per tic filled the machine
+    // with copies and left no spare time for the desktop or the pointer.
+    const int tic = I_GetTime();
+    if (tic == drawn_tic) {
+        return;
+    };
+    drawn_tic = tic;
 
     /* Offsets in case FB is bigger than DOOM */
     /* 600 = s_Fb heigt, 200 screenheight */

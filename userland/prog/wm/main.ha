@@ -46,7 +46,7 @@ fn terminal() bool = {
 	let did = false;
 	for (let pass = 0z; pass < 16; pass += 1) {
 		let b: [512]u8 = [0...];
-		const n = rt::readfile("/dev/wmout", b[..]);
+		const n = rt::readfile("/dev/sessionout", b[..]);
 		if (n == 0) {
 			break;
 		};
@@ -62,7 +62,7 @@ fn terminal() bool = {
 
 fn requests() bool = {
 	let b: [64]u8 = [0...];
-	const n = rt::readfile("/dev/wmreq", b[..]);
+	const n = rt::readfile("/dev/gfxreq", b[..]);
 	if (n < 3) {
 		return false;
 	};
@@ -78,15 +78,17 @@ fn requests() bool = {
 	put64(reply[..], 0, wi: u64);
 	put64(reply[..], 8, w: u64);
 	put64(reply[..], 16, h: u64);
-	_ = rt::writefile("/dev/wmreply", reply[..]);
+	_ = rt::writefile("/dev/gfxreply", reply[..]);
 	return true;
 };
 
 let lastframe = 0u64;
 
+def MAXFRAME: size = 1280 * 1024 * 4;
+
 fn frames(scratch: uintptr) bool = {
 	let hdr: [32]u8 = [0...];
-	const n = rt::readat("/dev/wmframe", 0, hdr[..]);
+	const n = rt::readat("/dev/gfxframe", 0, hdr[..]);
 	if (n < 32) {
 		return false;
 	};
@@ -98,10 +100,10 @@ fn frames(scratch: uintptr) bool = {
 	const wi = get64(hdr[..], 0): size;
 	const off = get64(hdr[..], 8);
 	const count = get64(hdr[..], 16): size;
-	if (wi == NONE || count == 0 || count > 640 * 400 * 4) {
+	if (wi == NONE || count == 0 || count > MAXFRAME) {
 		return false;
 	};
-	const got = rt::readat("/dev/wmframe", 32, bytes(scratch, count));
+	const got = rt::readat("/dev/gfxframe", 32, bytes(scratch, count));
 	if (got > 0) {
 		draw_frame(wi, bytes(scratch, got), off);
 	};
@@ -116,7 +118,7 @@ fn on_new_window(wi: size) void = {
 		return;
 	};
 	const b: [2]u8 = [id: u8, wi: u8];
-	_ = rt::writefile("/dev/wmbind", b[..]);
+	_ = rt::writefile("/dev/sessionbind", b[..]);
 };
 
 // Deleting a drawing window ends the program that owned it.
@@ -131,7 +133,7 @@ let lastfocus: size = ~0z;
 fn report_state() void = {
 	if (take_fresh()) {
 		const one: [1]u8 = [0];
-		_ = rt::writefile("/dev/wmfresh", one[..]);
+		_ = rt::writefile("/dev/sessionfresh", one[..]);
 	};
 	let w = 0z;
 	let h = 0z;
@@ -142,13 +144,13 @@ fn report_state() void = {
 		let d: [16]u8 = [0...];
 		put64(d[..], 0, w: u64);
 		put64(d[..], 8, h: u64);
-		_ = rt::writefile("/dev/wmdims", d[..]);
+		_ = rt::writefile("/dev/gfxdims", d[..]);
 	};
 	const wi = focus_win();
 	if (wi != lastfocus) {
 		lastfocus = wi;
 		const one: [1]u8 = [wi: u8];
-		_ = rt::writefile("/dev/wmfocus", one[..]);
+		_ = rt::writefile("/dev/sessionfocus", one[..]);
 	};
 };
 
@@ -161,12 +163,12 @@ export @symbol("main") fn main() void = {
 	new_win_hook = &on_new_window;
 	close_hook = &on_close_window;
 	begin();
-	const scratch = rt::page_alloc(256);
+	// Room for the largest frame a drawing window can hand over.
+	const scratch = rt::page_alloc(1282);
 	if (scratch == 0) {
 		return;
 	};
 	let ev: [8]u8 = [0...];
-	let busy = 0z;
 	for (true) {
 		let work = terminal();
 		if (requests()) {
@@ -175,8 +177,10 @@ export @symbol("main") fn main() void = {
 		if (frames(scratch)) {
 			work = true;
 		};
-		// Drain every pointer edge that arrived, not just one per tick.
-		for (let pass = 0z; pass < 32; pass += 1) {
+		// Poll for a few pointer edges, not thirty-two. Each try pokes the
+		// PS/2 controller with interrupts off, so a long empty poll made the
+		// whole desktop stutter while the pointer was sitting still.
+		for (let pass = 0z; pass < 4; pass += 1) {
 			const n = rt::readfile("/dev/mouse", ev[..]);
 			if (n != 8) {
 				break;
@@ -188,11 +192,9 @@ export @symbol("main") fn main() void = {
 		report_state();
 		flush();
 		sync();
-		if (work && busy < 8) {
-			busy += 1;
-		} else {
-			busy = 0;
-			rt::cop();
-		};
+		// Frames arrive faster than this loop can drain them, so give the
+		// game and the shell a turn every time rather than after eight
+		// expensive repaints.
+		rt::cop();
 	};
 };

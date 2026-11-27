@@ -7,12 +7,12 @@
 // /dev/kbd: key edges as 64-bit words, the scancode low, BUNIX_KEY_UP when a
 // key was released and BUNIX_KEY_EXT when the scancode was an extended one. A
 // game holds several keys at once and has to see the moment one is let go,
-// which a character stream cannot tell it. The clock is /proc/millis:
-// milliseconds since boot, so a game loop paces itself against the machine
-// rather than counting its own iterations. The screen's size is /proc/fb.
+// which a character stream cannot tell it. The clock is /proc/millis for a
+// person at the shell, but a game asks for it on every loop, so a program can
+// also get the same milliseconds straight from the clock call. The screen's
+// size is /proc/fb.
 //
-// Everything here rides the read and write syscalls already there; no system
-// call of its own is needed.
+// Everything else here rides the read and write syscalls already there.
 
 #ifndef BUNIX_DEV_H
 #define BUNIX_DEV_H
@@ -101,17 +101,11 @@ static inline int bunix_kbd_event(uint64_t *ev) {
     return bunix_readfile("/dev/kbd", ev, sizeof(*ev)) == (ssize_t)sizeof(*ev);
 }
 
-// Milliseconds since boot, from /proc/millis.
+// Milliseconds since boot. /proc/millis shows the same number as a file,
+// but reading and parsing that text on every loop made sound-heavy programs
+// spend more time asking the time than drawing their next frame.
 static inline uint64_t bunix_millis(void) {
-    char buf[24];
-    ssize_t n = bunix_readfile("/proc/millis", buf, sizeof(buf) - 1);
-    if (n <= 0) return 0;
-    buf[n] = 0;
-    uint64_t v = 0;
-    for (const char *p = buf; *p >= '0' && *p <= '9'; p++) {
-        v = v * 10 + (uint64_t)(*p - '0');
-    }
-    return v;
+    return syscall0(SYS_MILLIS);
 }
 
 // Waits for ms to pass, giving the processor to other programs meanwhile.

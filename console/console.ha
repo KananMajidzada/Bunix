@@ -1,13 +1,13 @@
 use architecture;
-use wm;
+use session;
 use rt;
 
 let lastbtn: u8 = 0;
 let in_poll = false;
 
 // Everything goes to both screens. The serial port carries the bytes straight
-// through for a terminal to interpret; the window manager draws them in the
-// terminal window, interpreting the escape sequences itself.
+// through for a terminal to interpret; the compositor draws them in the
+// terminal it owns, interpreting the escape sequences itself.
 //
 // The window manager draws the cell that changed and pushes just that cell, so
 // a letter appears at once. Redrawing the whole frame here instead would mean
@@ -18,7 +18,7 @@ let in_poll = false;
 export fn putc(ch: u8) void = {
 	serial_putc(ch);
 	vga_putc(ch);
-	wm::putc(ch, wm::out_target());
+	session::putc(ch, session::target());
 };
 
 // The size of the console, so a program can lay itself out to fit. With the
