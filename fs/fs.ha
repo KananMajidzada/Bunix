@@ -21,6 +21,11 @@ def MAXCHILD: size = 64;
 // One namespace per thread slot. A program started above this many threads
 // would otherwise share the shell's namespace and its current directory.
 def MAXNS: size = 16;
+// A namespace can hold a few grafts of its own. They are removed when the
+// process leaves, but the trees they point at are never owned by the namespace.
+def MAXMOUNT: size = 8;
+// Services posted to /dock. A post is an alias, not a copy of the server's tree.
+def MAXDOCK: size = 8;
 // A directory listing is the largest thing still gathered into a fixed buffer,
 // and a full one of these node names is a little over 2 KiB.
 def BUFSZ: size = 4096;
@@ -50,6 +55,9 @@ export type node = struct {
 	disk: bool,
 	dblock: u32,
 	dlen: u32,
+	// A name that stands for another node. Walking through it carries on in
+	// the target, while the name it was posted under stays the one people see.
+	alias: size,
 	// The size of a file whose bytes are not held here, such as a program
 	// that really lives in the image folded into the kernel.
 	fsize: u64,
@@ -64,6 +72,9 @@ export type ns = struct {
 	inuse: [MAXHANDLE]bool,
 	hnode: [MAXHANDLE]size,
 	owned: bool,
+	mount_used: [MAXMOUNT]bool,
+	mount_parent: [MAXMOUNT]size,
+	mount_child: [MAXMOUNT]size,
 };
 
 // Handles and node ids both come off the wire in some paths, so every index
@@ -123,7 +134,7 @@ let nodes: [MAXNODE]node = [node {
 	nam = [0...], nlen = 0, isdir = false, nchild = 0, children = [0...],
 	content = [], gen = null, gdsk = null, writable = false, wdev = null,
 	wdsk = null, wlen = 0, wbuf = 0, wcap = 0, disk = false, dblock = 0, dlen = 0,
-	fsize = 0,
+	alias = 0, fsize = 0,
 }...];
 let nnodes: size = 0;
 let root: size = 0;
@@ -131,12 +142,21 @@ let devroot: size = 0;
 let procroot: size = 0;
 let usrroot: size = 0;
 let binroot: size = 0;
+let dockroot: size = 0;
+let dock_used: [MAXDOCK]bool = [false...];
+let dock_owner: [MAXDOCK]size = [0...];
+let dock_node: [MAXDOCK]size = [0...];
+let dock_nam: [MAXDOCK][32]u8 = [[0...]...];
+let dock_nlen: [MAXDOCK]size = [0...];
 let nss: [MAXNS]ns = [ns {
 	root = 0,
 	cwd = 0,
 	inuse = [false...],
 	hnode = [0...],
 	owned = false,
+	mount_used = [false...],
+	mount_parent = [0...],
+	mount_child = [0...],
 }...];
 
 let scratch: [BUFSZ]u8 = [0...];
@@ -204,6 +224,7 @@ fn mknode(name: str, isdir: bool) size = {
 	nd.disk = false;
 	nd.dblock = 0;
 	nd.dlen = 0;
+	nd.alias = 0;
 	nd.fsize = 0;
 	nused += 1;
 	return id;
@@ -283,6 +304,15 @@ fn free_node(id: size) void = {
 
 fn free_tree(id: size) void = {
 	const nd = &nodes[id];
+	// An alias names a tree someone else owns: forget the name, never the
+	// files behind it.
+	if (nd.alias != 0) {
+		nd.alias = 0;
+		nd.nchild = 0;
+		nd.children = [0...];
+		free_node(id);
+		return;
+	};
 	for (let i = 0z; i < nd.nchild; i += 1) {
 		free_tree(nd.children[i]);
 	};
@@ -661,6 +691,11 @@ fn win_read(buf: []u8, off: u64, n: size) size = {
 	buf[k] = ' ': u8;
 	k += 1;
 	k += put_num(buf[k..], h: u64);
+	// A third number names the shared surface behind the picture. Programs
+	// that only care about size stop after the first two, as they always have.
+	buf[k] = ' ': u8;
+	k += 1;
+	k += put_num(buf[k..], gfx::reply_surface(): u64);
 	buf[k] = '\n': u8;
 	k += 1;
 	return k;
@@ -729,6 +764,266 @@ fn session_fresh_write(data: []u8, off: u64) size = {
 	_ = off;
 	session::set_fresh();
 	return 1;
+};
+
+// The words of a control-file command. A newline ends a word just like a
+// space, and empty words are skipped rather than handed to a lookup.
+fn nextword(data: []u8, at: *size) []u8 = {
+	for (*at < len(data) && (data[*at] == (' ': u8)
+			|| data[*at] == ('\t': u8) || data[*at] == ('\n': u8))) {
+		*at += 1;
+	};
+	const start = *at;
+	for (*at < len(data) && data[*at] != (' ': u8)
+			&& data[*at] != ('\t': u8) && data[*at] != ('\n': u8)) {
+		*at += 1;
+	};
+	return data[start..*at];
+};
+
+fn word_eq(b: []u8, s: str) bool = {
+	const sb = *(&s: *[]u8);
+	if (len(b) != len(sb)) {
+		return false;
+	};
+	for (let i = 0z; i < len(b); i += 1) {
+		if (b[i] != sb[i]) {
+			return false;
+		};
+	};
+	return true;
+};
+
+// Splits a destination into the directory to change and the name to give the
+// graft. The returned name points into resolve()'s buffer, so it is only good
+// until the next path is resolved.
+fn parent_of(path: []u8, name: *[]u8) size = {
+	const p = resolve(path);
+	const b = *(&p: *[]u8);
+	let end = len(b);
+	for (end > 0 && b[end - 1] == ('/': u8)) {
+		end -= 1;
+	};
+	let start = end;
+	for (start > 0 && b[start - 1] != ('/': u8)) {
+		start -= 1;
+	};
+	*name = b[start..end];
+	return lookup_abs(b[..start]);
+};
+
+// The alias under a parent, rather than the tree it points at. Unweaving has
+// to take the name away, not the service behind it.
+fn find_name(parent: size, name: []u8) size = {
+	if (parent >= MAXNODE || !nodes[parent].isdir) {
+		return NOCHILD;
+	};
+	const nd = &nodes[parent];
+	for (let i = 0z; i < nd.nchild; i += 1) {
+		const c = nd.children[i];
+		if (name_eq(nodename(c), name)) {
+			return c;
+		};
+	};
+	return NOCHILD;
+};
+
+fn unlink_child(parent: size, child: size) bool = {
+	if (parent >= MAXNODE) {
+		return false;
+	};
+	const nd = &nodes[parent];
+	for (let i = 0z; i < nd.nchild; i += 1) {
+		if (nd.children[i] != child) {
+			continue;
+		};
+		for (let j = i + 1; j < nd.nchild; j += 1) {
+			nd.children[j - 1] = nd.children[j];
+		};
+		nd.nchild -= 1;
+		nd.children[nd.nchild] = 0;
+		return true;
+	};
+	return false;
+};
+
+// /dev/weave: `weave src dst` grafts a tree into this namespace; `unweave dst`
+// takes that graft back out. Both are aliases, so the original tree is never
+// changed and never freed with the namespace that borrowed it.
+fn weave_write(data: []u8, off: u64) size = {
+	_ = off;
+	let at = 0z;
+	const op = nextword(data, &at);
+	if (word_eq(op, "weave")) {
+		const srcword = nextword(data, &at);
+		const dstword = nextword(data, &at);
+		if (len(srcword) == 0 || len(dstword) == 0) {
+			return 0;
+		};
+		const src = lookup(srcword);
+		if (src == NOCHILD) {
+			return 0;
+		};
+		let nm: []u8 = [];
+		const parent = parent_of(dstword, &nm);
+		if (parent == NOCHILD || len(nm) == 0
+				|| find(parent, nm) != NOCHILD) {
+			return 0;
+		};
+		const s = cur();
+		let slot = MAXMOUNT;
+		for (let i = 0z; i < MAXMOUNT; i += 1) {
+			if (!s.mount_used[i]) {
+				slot = i;
+				break;
+			};
+		};
+		if (slot == MAXMOUNT) {
+			return 0;
+		};
+		const alias = mknode(*(&nm: *str), nodes[src].isdir);
+		nodes[alias].alias = src;
+		if (!link(parent, alias)) {
+			free_node(alias);
+			return 0;
+		};
+		s.mount_used[slot] = true;
+		s.mount_parent[slot] = parent;
+		s.mount_child[slot] = alias;
+		return len(data);
+	};
+	if (word_eq(op, "unweave")) {
+		const dstword = nextword(data, &at);
+		if (len(dstword) == 0) {
+			return 0;
+		};
+		let nm: []u8 = [];
+		const parent = parent_of(dstword, &nm);
+		if (parent == NOCHILD) {
+			return 0;
+		};
+		const alias = find_name(parent, nm);
+		if (alias == NOCHILD || nodes[alias].alias == 0) {
+			return 0;
+		};
+		const s = cur();
+		for (let i = 0z; i < MAXMOUNT; i += 1) {
+			if (!s.mount_used[i] || s.mount_parent[i] != parent
+					|| s.mount_child[i] != alias) {
+				continue;
+			};
+			_ = unlink_child(parent, alias);
+			free_node(alias);
+			s.mount_used[i] = false;
+			s.mount_parent[i] = 0;
+			s.mount_child[i] = 0;
+			return len(data);
+		};
+	};
+	return 0;
+};
+
+// Everything this namespace borrowed goes back before its private tree is
+// freed. The alias nodes are its own; the trees behind them are not.
+fn weave_release_all(s: *ns) void = {
+	for (let i = 0z; i < MAXMOUNT; i += 1) {
+		if (!s.mount_used[i]) {
+			continue;
+		};
+		_ = unlink_child(s.mount_parent[i], s.mount_child[i]);
+		free_node(s.mount_child[i]);
+		s.mount_used[i] = false;
+		s.mount_parent[i] = 0;
+		s.mount_child[i] = 0;
+	};
+};
+
+fn dock_find(name: []u8) size = {
+	for (let i = 0z; i < MAXDOCK; i += 1) {
+		if (!dock_used[i]) {
+			continue;
+		};
+		if (word_eq(dock_nam[i][..dock_nlen[i]], *(&name: *str))) {
+			return i;
+		};
+	};
+	return NOCHILD;
+};
+
+fn dock_forget(i: size) void = {
+	_ = unlink_child(dockroot, dock_node[i]);
+	free_node(dock_node[i]);
+	dock_used[i] = false;
+	dock_owner[i] = 0;
+	dock_node[i] = 0;
+	dock_nlen[i] = 0;
+};
+
+// /dev/dockctl: `post name path` publishes a directory under /dock;
+// `withdraw name` takes it down. A post is a name, not a copy: changes the
+// server makes to its tree show up through the dock immediately.
+fn dock_write(data: []u8, off: u64) size = {
+	_ = off;
+	let at = 0z;
+	const op = nextword(data, &at);
+	if (word_eq(op, "post")) {
+		const name = nextword(data, &at);
+		const path = nextword(data, &at);
+		if (len(name) == 0 || len(name) > 32 || len(path) == 0) {
+			return 0;
+		};
+		if (dock_find(name) != NOCHILD) {
+			return 0;
+		};
+		const target = lookup(path);
+		if (target == NOCHILD || !nodes[target].isdir) {
+			return 0;
+		};
+		let slot = MAXDOCK;
+		for (let i = 0z; i < MAXDOCK; i += 1) {
+			if (!dock_used[i]) {
+				slot = i;
+				break;
+			};
+		};
+		if (slot == MAXDOCK) {
+			return 0;
+		};
+		const alias = mknode(*(&name: *str), true);
+		nodes[alias].alias = target;
+		if (!link(dockroot, alias)) {
+			free_node(alias);
+			return 0;
+		};
+		dock_used[slot] = true;
+		dock_owner[slot] = sched::current_id();
+		dock_node[slot] = alias;
+		dock_nlen[slot] = len(name);
+		for (let i = 0z; i < len(name); i += 1) {
+			dock_nam[slot][i] = name[i];
+		};
+		return len(data);
+	};
+	if (word_eq(op, "withdraw")) {
+		const name = nextword(data, &at);
+		const i = dock_find(name);
+		if (i == NOCHILD) {
+			return 0;
+		};
+		dock_forget(i);
+		return len(data);
+	};
+	return 0;
+};
+
+// A service that leaves takes its posted names with it, so /dock never holds
+// an alias to a tree whose owner is gone.
+fn dock_release(owner: size) void = {
+	for (let i = 0z; i < MAXDOCK; i += 1) {
+		if (dock_used[i] && dock_owner[i] == owner) {
+			dock_forget(i);
+		};
+	};
 };
 
 fn gfx_dims_write(data: []u8, off: u64) size = {
@@ -1091,6 +1386,13 @@ export fn init() void = {
 		link(share, c);
 	};
 
+	// /dock is where services wait to be found. A program posts a name here
+	// and another weaves it into its own namespace; the kernel only holds the
+	// alias, not a copy of the service's files.
+	const dock = mknode("dock", true);
+	link(root, dock);
+	dockroot = dock;
+
 	const bin = mknode("bin", true);
 	link(root, bin);
 	binroot = bin;
@@ -1184,6 +1486,11 @@ export fn init() void = {
 	nodes[gfxreply].wdsk = &gfx::reply_write;
 	link(dev, gfxreply);
 
+	const flip = mknode("flip", false);
+	nodes[flip].gdsk = &gfx::flip_read;
+	nodes[flip].wdsk = &gfx::flip_write;
+	link(dev, flip);
+
 	const sessionfocus = mknode("sessionfocus", false);
 	nodes[sessionfocus].wdsk = &session_focus_write;
 	link(dev, sessionfocus);
@@ -1191,6 +1498,14 @@ export fn init() void = {
 	const sessionspawn = mknode("sessionspawn", false);
 	nodes[sessionspawn].wdsk = &session_spawn_write;
 	link(dev, sessionspawn);
+
+	const weave = mknode("weave", false);
+	nodes[weave].wdsk = &weave_write;
+	link(dev, weave);
+
+	const dockctl = mknode("dockctl", false);
+	nodes[dockctl].wdsk = &dock_write;
+	link(dev, dockctl);
 
 	const gfxdims = mknode("gfxdims", false);
 	nodes[gfxdims].wdsk = &gfx_dims_write;
@@ -1295,6 +1610,7 @@ fn ns_root_make() size = {
 	link(r, procroot);
 	link(r, usrroot);
 	link(r, binroot);
+	link(r, dockroot);
 	link(r, mknode("tmp", true));
 	return r;
 };
@@ -1316,6 +1632,9 @@ export fn ns_install(id: size, fresh: bool) void = {
 		inuse = [false...],
 		hnode = [0...],
 		owned = fresh,
+		mount_used = [false...],
+		mount_parent = [0...],
+		mount_child = [0...],
 	};
 };
 
@@ -1326,14 +1645,19 @@ export fn ns_install(id: size, fresh: bool) void = {
 // /bin were freed along with its own /tmp.
 fn bound(id: size) bool = {
 	return id == devroot || id == procroot || id == usrroot
-		|| id == binroot;
+		|| id == binroot || id == dockroot || nodes[id].alias != 0;
 };
 
 export fn ns_reap(id: size) void = {
-	// A program that leaves takes its sound with it, whether it had a tree
-	// of its own or shared the one it was started in.
+	// A program that leaves takes its sound and its posted names with it,
+	// and gives back every tree it borrowed into its namespace.
 	sound::audio_release(id);
-	if (id >= MAXNS || !nss[id].owned) {
+	dock_release(id);
+	if (id >= MAXNS) {
+		return;
+	};
+	weave_release_all(&nss[id]);
+	if (!nss[id].owned) {
 		return;
 	};
 	const r = nss[id].root;
@@ -1351,6 +1675,9 @@ export fn ns_reap(id: size) void = {
 		inuse = [false...],
 		hnode = [0...],
 		owned = false,
+		mount_used = [false...],
+		mount_parent = [0...],
+		mount_child = [0...],
 	};
 };
 
@@ -1379,7 +1706,9 @@ fn find(parent: size, name: []u8) size = {
 	for (let i = 0z; i < nd.nchild; i += 1) {
 		const c = nd.children[i];
 		if (name_eq(nodename(c), name)) {
-			return c;
+			// A posted service keeps its own name but walking through it
+			// carries on in the tree the publisher posted.
+			return if (nodes[c].alias != 0) nodes[c].alias else c;
 		};
 	};
 	return NOCHILD;

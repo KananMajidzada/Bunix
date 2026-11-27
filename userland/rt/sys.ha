@@ -47,6 +47,9 @@ type shdr = struct {
 @symbol("rt.sys_panic") fn sys_panic(magic: u64) u64;
 @symbol("rt.sys_fault") fn sys_fault(magic: u64) u64;
 @symbol("rt.sys_millis") fn sys_millis() u64;
+@symbol("rt.sys_surface_new") fn sys_surface_new(w: size, h: size) u64;
+@symbol("rt.sys_surface_map") fn sys_surface_map(id: size) uintptr;
+@symbol("rt.sys_surface_release") fn sys_surface_release(id: size) u64;
 
 // The two ways to try the panic screen, for when you want to see it. A wrong
 // word is ignored by the kernel, so a program cannot stop the machine by a
@@ -56,6 +59,12 @@ def PANIC_MAGIC: u64 = 0x42554E49;
 export fn test_panic() u64 = sys_panic(PANIC_MAGIC);
 export fn test_fault() u64 = sys_fault(PANIC_MAGIC);
 export fn millis() u64 = sys_millis();
+
+// Shared drawing surfaces. A compositor makes one, maps it, and passes the id
+// to the program that draws; both sides then write and read the same frames.
+export fn surface_new(w: size, h: size) u64 = sys_surface_new(w, h);
+export fn surface_map(id: size) uintptr = sys_surface_map(id);
+export fn surface_release(id: size) bool = sys_surface_release(id) != 0;
 @symbol("rt.arg_ptr") let arg_ptr: u64;
 @symbol("rt.arg_len") let arg_len: u64;
 

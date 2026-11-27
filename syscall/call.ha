@@ -35,6 +35,9 @@ export def REDIRECT: u64 = 24;
 export def PANIC: u64 = 25;
 export def FAULT: u64 = 26;
 export def MILLIS: u64 = 27;
+export def SURFACE_NEW: u64 = 28;
+export def SURFACE_MAP: u64 = 29;
+export def SURFACE_RELEASE: u64 = 30;
 
 // A program cannot stop the machine by accident. The two diagnostic calls
 // need a word in the register as well as the call number.
@@ -369,6 +372,15 @@ fn handle(regs: *architecture::registers) uintptr = {
 		// than the frame itself, so programs can ask for the tick count
 		// straight instead.
 		regs.rax = architecture::millis();
+		return regs: uintptr;
+	case SURFACE_NEW =>
+		regs.rax = sched::surface_new(regs.rdi: size, regs.rsi: size): u64;
+		return regs: uintptr;
+	case SURFACE_MAP =>
+		regs.rax = sched::surface_map(regs.rdi: size): u64;
+		return regs: uintptr;
+	case SURFACE_RELEASE =>
+		regs.rax = if (sched::surface_release(regs.rdi: size)) 1 else 0;
 		return regs: uintptr;
 	case =>
 		regs.rax = 0xFFFFFFFFFFFFFFFF;

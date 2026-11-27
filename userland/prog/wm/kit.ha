@@ -85,6 +85,8 @@ type win = struct {
 	graphic: bool,
 	gbuf: uintptr,		// the picture, gw by gh 32-bit pixels
 	gpages: size,		// the frames gbuf was taken from
+	gsurf: size,		// the shared surface id behind gbuf, zero for no surface
+	gcapw: size, gcaph: size,	// surface capacity, which can outlive a resize
 	gw: size, gh: size,	// the picture's size, which is the program's screen
 	gname: [16]u8, gnlen: size,	// what the title bar calls it
 	owner: size,		// the thread the window was made for
@@ -209,6 +211,16 @@ export fn gfx_dims(w: *size, h: *size) void = {
 	*h = wins[wi].gh;
 };
 
+// The shared surface behind the drawing window, handed to the program that
+// owns it when the compositor answers its /dev/win request.
+export fn gfx_surface() size = {
+	const wi = gfx_window();
+	if (wi == NONE) {
+		return 0;
+	};
+	return wins[wi].gsurf;
+};
+
 // Set to the window whose contents changed. Terminal output only ever affects
 // the window it was written to, so redrawing the desktop behind it for every
 // keystroke is what makes a full-screen program flicker.
@@ -327,48 +339,61 @@ fn glayout(wi: size) void = {
 	wins[wi].wh = TITLE + 2 * BORD + wins[wi].gh;
 };
 
-// Hands back the frames a picture was held in.
+// Hands back the shared frames a picture was held in.
 fn gfree(wi: size) void = {
-	const p = wins[wi].gbuf;
+	if (wins[wi].gsurf != 0) {
+		rt::surface_release(wins[wi].gsurf);
+	};
 	wins[wi].gbuf = 0;
 	wins[wi].gpages = 0;
+	wins[wi].gsurf = 0;
+	wins[wi].gcapw = 0;
+	wins[wi].gcaph = 0;
 	wins[wi].gw = 0;
 	wins[wi].gh = 0;
 };
 
-// Makes a picture of w by h pixels for the window, carrying over whatever of
-// the old one still fits. False when there is no room, and then nothing about
-// the window has changed.
+// Makes a picture of w by h pixels for the window. The frames are sized for
+// the whole screen once, so dragging the window only changes what part of them
+// is used: the drawing program's mapping and surface id never go stale.
 fn galloc(wi: size, w: size, h: size) bool = {
 	if (w < 16 || h < 16) {
 		return false;
 	};
-	const pages = (w * h * 4 + 4095) / 4096;
-	const p = rt::page_alloc(pages: u64);
-	if (p == 0) {
+	// The kernel hands out zeroed frames, so a brand-new surface needs no
+	// second pass here. A resized one does: pixels outside the smaller
+	// picture must not survive from the old size.
+	let clean = false;
+	if (wins[wi].gsurf == 0) {
+		const cw = fb::width();
+		const ch = fb::height();
+		if (w > cw || h > ch) {
+			return false;
+		};
+		const id: size = rt::surface_new(cw, ch): size;
+		if (id == 0) {
+			return false;
+		};
+		const p = rt::surface_map(id);
+		if (p == 0) {
+			rt::surface_release(id);
+			return false;
+		};
+		wins[wi].gsurf = id;
+		wins[wi].gbuf = p;
+		wins[wi].gpages = ((cw * ch * 4 + 4095) / 4096);
+		wins[wi].gcapw = cw;
+		wins[wi].gcaph = ch;
+		clean = true;
+	} else if (w > wins[wi].gcapw || h > wins[wi].gcaph) {
 		return false;
 	};
-	// Cleared a word at a time: whatever the old picture does not cover must
-	// never show some other program's pixels.
-	for (let i = 0z; i < pages * 4096 / 8; i += 1) {
-		*((p + ((i * 8): uintptr)): *u64) = 0;
-	};
-	const old = wins[wi].gbuf;
-	if (old != 0) {
-		const ow = wins[wi].gw;
-		const oh = wins[wi].gh;
-		const cw = if (w < ow) w else ow;
-		const ch = if (h < oh) h else oh;
-		for (let j = 0z; j < ch; j += 1) {
-			for (let i = 0z; i < cw; i += 1) {
-				*((p + ((((j * w) + i) * 4): uintptr)): *u32) =
-					*((old + ((((j * ow) + i) * 4): uintptr)): *u32);
-			};
+	if (!clean) {
+		const pages = wins[wi].gpages;
+		for (let i = 0z; i < pages * 4096 / 8; i += 1) {
+			*((wins[wi].gbuf + ((i * 8): uintptr)): *u64) = 0;
 		};
-		gfree(wi);
 	};
-	wins[wi].gbuf = p;
-	wins[wi].gpages = pages;
 	wins[wi].gw = w;
 	wins[wi].gh = h;
 	return true;
@@ -426,6 +451,22 @@ fn show(wi: size) void = {
 	};
 	draw_pointer();
 	fb::present();
+};
+
+// A program has finished a frame in a shared surface. Find the window using
+// that surface and show exactly its picture; no frame bytes travel anywhere.
+export fn surface_show(surf: size) bool = {
+	if (surf == 0) {
+		return false;
+	};
+	for (let i = 0z; i < MAXWIN; i += 1) {
+		if (wins[i].used && wins[i].graphic && wins[i].gsurf == surf) {
+			dirty_win = i;
+			show(i);
+			return true;
+		};
+	};
+	return false;
 };
 
 // Puts a frame the program wrote into its window. The pixels are packed

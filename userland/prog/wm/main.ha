@@ -78,15 +78,17 @@ fn requests() bool = {
 	// marker for an unused slot, so it has to be translated here or a failed
 	// request binds a program to a session that does not exist.
 	const answer = if (wi == NONE) ~0z else wi;
-	let reply: [24]u8 = [0...];
+	let reply: [32]u8 = [0...];
 	put64(reply[..], 0, answer: u64);
 	put64(reply[..], 8, w: u64);
 	put64(reply[..], 16, h: u64);
+	put64(reply[..], 24, gfx_surface(): u64);
 	_ = rt::writefile("/dev/gfxreply", reply[..]);
 	return true;
 };
 
 let lastframe = 0u64;
+let lastflip = 0u64;
 
 def MAXFRAME: size = 1280 * 1024 * 4;
 
@@ -112,6 +114,22 @@ fn frames(scratch: uintptr) bool = {
 		draw_frame(wi, bytes(scratch, got), off);
 	};
 	return true;
+};
+
+// Programs that map a shared surface ring /dev/flip when a frame is ready.
+// The pixels are already in the window's buffer, so this is only a doorbell.
+fn flips() bool = {
+	let hdr: [16]u8 = [0...];
+	const n = rt::readfile("/dev/flip", hdr[..]);
+	if (n < 16) {
+		return false;
+	};
+	const seq = get64(hdr[..], 8);
+	if (seq == lastflip) {
+		return false;
+	};
+	lastflip = seq;
+	return surface_show(get64(hdr[..], 0): size);
 };
 
 // A drawing program has ended. The kernel only tells us the two numbers it
@@ -196,6 +214,9 @@ export @symbol("main") fn main() void = {
 			work = true;
 		};
 		if (frames(scratch)) {
+			work = true;
+		};
+		if (flips()) {
 			work = true;
 		};
 		if (exits()) {

@@ -168,6 +168,24 @@ rt.sys_millis:
 	int $0x80
 	ret
 
+.global rt.sys_surface_new
+rt.sys_surface_new:
+	movq $28, %rax
+	int $0x80
+	ret
+
+.global rt.sys_surface_map
+rt.sys_surface_map:
+	movq $29, %rax
+	int $0x80
+	ret
+
+.global rt.sys_surface_release
+rt.sys_surface_release:
+	movq $30, %rax
+	int $0x80
+	ret
+
 .data
 .align 8
 .global rt.arg_ptr

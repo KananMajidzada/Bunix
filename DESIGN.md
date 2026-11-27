@@ -166,6 +166,21 @@ the same files. There is no `wm/` code in the kernel. A manager takes its
 surfaces back when their owner exits, which is why closing a game returns the
 screen to the shell instead of leaving the last frame on it.
 
+A drawing program can share frames with the manager instead of sending pixels
+through a file. The manager makes a surface the size of the screen with system
+call 28, maps it with 29, and gives the program its id in the fourth word of
+`/dev/gfxreply` and the third number of `/dev/win`. The program maps the same
+frames with 29, writes pixels straight into them, and rings `/dev/flip` with
+the id when a frame is ready. The manager reads the id and a sequence number,
+composites that surface into its shadow, and presents the whole shadow to the
+device as before. System call 30 gives the frames back when the window is
+closed. Shared mappings are marked so a process leaving does not free frames
+the manager still reads, and a new surface comes zeroed. The size is taken
+from the screen once, so dragging a window changes the part of the surface
+that is shown without remapping it or changing its id. Programs that do not
+map a surface keep using `/dev/fb`, so a serial-only boot and another manager
+still work.
+
 Which manager starts is a choice, not a kernel setting: `make BOOT_WM=/mywm`
 builds with that program as the default, and a boot loader's `wm=/other`
 command line wins at run time. It still has to be in the built program image,
@@ -245,6 +260,20 @@ be in different places at once, and a process that shares a namespace with
 the one that started it starts where that one is. The `chdir` and `pwd` calls
 are how a process says where it is.
 
+A namespace can also weave another tree into itself. `weave src dst` puts an
+alias at `dst` that walks through `src`, and `unweave dst` takes only that
+alias back out. Both commands write words to `/dev/weave`; the kernel keeps
+the grafts per namespace and drops them when the process leaves. The tree
+behind a graft belongs to whoever made it, so neither weaving nor leaving
+changes the original.
+
+Services are found through the dock. `post name path` writes to
+`/dev/dockctl` and puts an alias under `/dock`; `withdraw name` removes it.
+The dock is bound into every namespace, so one program can publish a tree and
+another can weave `/dock/name` wherever it wants it. A posted name belongs to
+the process that published it and goes away when that process leaves. The
+kernel holds names, never copies of the service's files.
+
 ## The port environment
 
 The kernel speaks its own calls; a POSIX layer shoved into it would be the
@@ -283,7 +312,8 @@ The commands of the shell itself work on paths, so they follow the working
 directory: `cat`, `write`, `mkdir`, `rm` and `hd` take a path, and `cd` moves
 between them. The rest are about the machine: `pwd`, `env`, `export`, `unset`,
 `alias`, `unalias`, `history`, `which`, `man`, `uptime`, `free`, `sleep`,
-`clear`, `true` and `false`.
+`clear`, `true` and `false`. `weave`, `unweave`, `post` and `withdraw` work
+on grafts and posted services.
 
 `tutorial` is a walk through the system for someone who has just landed in it.
 It goes a page at a time, and a page is meant to fit on the screen: where you
@@ -413,6 +443,14 @@ it from its menu calls `exit`, which reaps the process, frees its window and
 stops its sound; deleting its drawing window from the desktop does the same.
 Either way the shell prompt comes back and no game is left running unseen.
 
+Done also: namespaces can weave in trees of their own, and services can post
+names in the dock for others to weave. The shell commands do the same work any
+program can do through `/dev/weave` and `/dev/dockctl`, and both kinds of name
+are released with the process that made them. Doom draws through a shared
+surface: the manager maps the frames, the game writes into them and rings
+`/dev/flip`, and the manager composes the finished picture without copying it
+across a system call.
+
 Started: the port environment. A POSIX shim in userspace gives the user program
 `open`, `read`, `write`, `close`, and `lseek` over the native whole-file calls.
 `wc`, `grep`, and `cp` are written against it, and each is a loadable image of
@@ -438,3 +476,6 @@ Next: a C compiler driver for the port environment.
 11. A pipe, as a file. [done]
 12. Sound as a file, with a Sound Blaster 16 behind it and Doom using it.
     [done; music not yet]
+13. Private grafts and a service dock reached through control files. [done]
+14. Shared drawing surfaces with a flip doorbell for programs that draw.
+    [done]

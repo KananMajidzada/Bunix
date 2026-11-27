@@ -76,7 +76,7 @@ type entry = struct {
 	paths: bool,
 };
 
-const MANUAL: [78]entry = [
+const MANUAL: [82]entry = [
 	entry { name = "cat", help = "print files", builtin = true , paths = true },
 	entry { name = "cd", help = "move to another directory", builtin = true , paths = false },
 	entry { name = "pwd", help = "say where this is", builtin = true , paths = false },
@@ -87,6 +87,10 @@ const MANUAL: [78]entry = [
 	entry { name = "touch", help = "make an empty file", builtin = true , paths = true },
 	entry { name = "rm", help = "remove a file, -r for a whole tree", builtin = true , paths = true },
 	entry { name = "hd", help = "dump a file in hex", builtin = true , paths = true },
+	entry { name = "weave", help = "graft a tree into this namespace: weave src dst", builtin = true , paths = false },
+	entry { name = "unweave", help = "take a graft back out: unweave dst", builtin = true , paths = false },
+	entry { name = "post", help = "publish a directory under /dock: post name path", builtin = true , paths = false },
+	entry { name = "withdraw", help = "take a posted service down: withdraw name", builtin = true , paths = false },
 	entry { name = "cc", help = "compile and link a C program", builtin = true , paths = true },
 	entry { name = "env", help = "list the environment", builtin = true , paths = false },
 	entry { name = "export", help = "set an environment variable", builtin = true , paths = false },
@@ -628,6 +632,14 @@ fn run_command(line: []u8) bool = {
 		run_write(rest);
 	} else if (str_eq(cmd, "hd")) {
 		run_hd(rest);
+	} else if (str_eq(cmd, "weave")) {
+		run_weave(rest);
+	} else if (str_eq(cmd, "unweave")) {
+		run_unweave(rest);
+	} else if (str_eq(cmd, "post")) {
+		run_post(rest);
+	} else if (str_eq(cmd, "withdraw")) {
+		run_withdraw(rest);
 	} else if (str_eq(cmd, "cc")) {
 		run_cc(rest);
 	} else if (str_eq(cmd, "mkdir")) {
@@ -1525,6 +1537,89 @@ fn run_hd(rest: []u8) void = {
 			rt::putc(' ');
 		};
 		rt::println("");
+	};
+};
+
+// One word of a control command. Paths here never contain spaces in practice,
+// and the kernel rejects anything it cannot resolve.
+fn shell_word(s: []u8, at: *size) []u8 = {
+	for (*at < len(s) && (s[*at] == (' ': u8) || s[*at] == ('\t': u8))) {
+		*at += 1;
+	};
+	const start = *at;
+	for (*at < len(s) && s[*at] != (' ': u8) && s[*at] != ('\t': u8)) {
+		*at += 1;
+	};
+	return s[start..*at];
+};
+
+fn send_ctl(path: str, op: str, a: []u8, b: []u8) bool = {
+	let buf: [256]u8 = [0...];
+	let n = 0z;
+	const head = *(&op: *[]u8);
+	put_into(buf[..], &n, head);
+	if (len(a) > 0) {
+		buf[n] = ' ': u8;
+		n += 1;
+		put_into(buf[..], &n, a);
+	};
+	if (len(b) > 0) {
+		buf[n] = ' ': u8;
+		n += 1;
+		put_into(buf[..], &n, b);
+	};
+	return rt::writefile(path, buf[..n]) != 0;
+};
+
+// Grafts and posted services are control files, not special system calls. The
+// shell is just another program using the same files any other program can.
+fn run_weave(rest: []u8) void = {
+	let at = 0z;
+	const src = shell_word(rest, &at);
+	const dst = shell_word(rest, &at);
+	if (len(src) == 0 || len(dst) == 0) {
+		rt::println("usage: weave <source> <destination>");
+		return;
+	};
+	if (!send_ctl("/dev/weave", "weave", src, dst)) {
+		rt::println("weave: cannot graft that path");
+	};
+};
+
+fn run_unweave(rest: []u8) void = {
+	let at = 0z;
+	const dst = shell_word(rest, &at);
+	if (len(dst) == 0) {
+		rt::println("usage: unweave <destination>");
+		return;
+	};
+	if (!send_ctl("/dev/weave", "unweave", dst, [])) {
+		rt::println("unweave: no graft at that path");
+	};
+};
+
+fn run_post(rest: []u8) void = {
+	let at = 0z;
+	const name = shell_word(rest, &at);
+	const path = shell_word(rest, &at);
+	if (len(name) == 0 || len(path) == 0) {
+		rt::println("usage: post <name> <directory>");
+		return;
+	};
+	if (!send_ctl("/dev/dockctl", "post", name, path)) {
+		rt::println("post: cannot publish that directory");
+	};
+};
+
+fn run_withdraw(rest: []u8) void = {
+	let at = 0z;
+	const name = shell_word(rest, &at);
+	if (len(name) == 0) {
+		rt::println("usage: withdraw <name>");
+		return;
+	};
+	if (!send_ctl("/dev/dockctl", "withdraw", name, [])) {
+		rt::println("withdraw: no such posted service");
 	};
 };
 

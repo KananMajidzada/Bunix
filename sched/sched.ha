@@ -2,6 +2,7 @@ use architecture;
 use session;
 use mem;
 use paging;
+use gfx;
 
 // The window manager, a shell for every terminal, and a program started from
 // each of them can all be alive at once. Eight slots ran out as soon as the
@@ -601,6 +602,37 @@ export fn user_alloc(pages: u64) uintptr = {
 	t.heap += bytes;
 	return base;
 };
+
+// Maps a shared surface into the running process. The frames are pinned by
+// gfx, so a process leaving does not put them back in the allocator while the
+// compositor is still drawing from them.
+export fn surface_map(id: size) uintptr = {
+	const t = &threads[current];
+	const count = gfx::surface_count(id);
+	if (t.space == 0 || count == 0) {
+		return 0;
+	};
+	const bytes = (count * 4096): uintptr;
+	if (t.heap + bytes > t.heap_end) {
+		return 0;
+	};
+	const base = t.heap;
+	for (let i = 0z; i < count; i += 1) {
+		const frame = gfx::surface_frame(id, i);
+		if (frame == 0) {
+			return 0;
+		};
+		const va = base + ((i * 4096): uintptr);
+		paging::map_user_shared(t.space, va: u64, frame);
+		paging::flush(va: u64);
+	};
+	t.heap += bytes;
+	return base;
+};
+
+export fn surface_new(w: size, h: size) size = gfx::surface_new(w, h);
+
+export fn surface_release(id: size) bool = gfx::surface_release(id);
 
 fn pick_next() uintptr = {
 	// Park the outgoing thread's FPU and SSE registers before touching the

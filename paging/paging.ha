@@ -5,6 +5,10 @@ def ENTRY_P: u64 = 1;
 def ENTRY_W: u64 = 2;
 def ENTRY_U: u64 = 4;
 def ENTRY_PS: u64 = 0x80;
+// A shared surface is mapped user-accessible but must not be freed when its
+// process goes away: another process still draws into the same frames. The bit
+// is in a software-only part of the page-table entry, so the CPU ignores it.
+def ENTRY_SH: u64 = 1 << 52;
 
 let boot: uintptr = 0;
 
@@ -115,6 +119,24 @@ export fn map_user(
 	set(pt, pt_i, e);
 };
 
+// Maps a frame that belongs to a shared surface. space_free() leaves these
+// frames alone; gfx releases them when the surface itself is released.
+export fn map_user_shared(
+	space: uintptr,
+	vaddr: u64,
+	paddr: uintptr,
+) void = {
+	map_user(space, vaddr, paddr, true);
+	const pml4_i = (vaddr >> 39) & 0x1FF;
+	const pdpt_i = (vaddr >> 30) & 0x1FF;
+	const pd_i = (vaddr >> 21) & 0x1FF;
+	const pt_i = (vaddr >> 12) & 0x1FF;
+	const pdpt = (get(space, pml4_i) & ~0xFFF): uintptr;
+	const pd = (get(pdpt, pdpt_i) & ~0xFFF): uintptr;
+	const pt = (get(pd, pd_i) & ~0xFFF): uintptr;
+	set(pt, pt_i, get(pt, pt_i) | ENTRY_SH);
+};
+
 export fn flush(vaddr: u64) void = {
 	architecture::invlpg(vaddr: uintptr);
 };
@@ -137,7 +159,8 @@ export fn space_free(space: uintptr) void = {
 		};
 		for (let i = 0u64; i < 512; i += 1) {
 			const e = get(pt, i);
-			if ((e & ENTRY_P) != 0 && (e & ENTRY_U) != 0) {
+			if ((e & ENTRY_P) != 0 && (e & ENTRY_U) != 0
+					&& (e & ENTRY_SH) == 0) {
 				mem::release((e & ~0xFFF): uintptr);
 			};
 		};

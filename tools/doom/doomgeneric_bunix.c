@@ -35,6 +35,8 @@ static uint32_t screen_w, screen_h;  // the picture the game draws into
 static int windowed;                 // in a window, rather than at the screen
 static uint32_t cap_w, cap_h;        // the most the picture buffers ever hold
 static uint32_t *frame;   // the scaled frame, one 32-bit pixel per picture pixel
+static uint64_t surface;  // the shared surface the compositor gave the window
+static uint32_t *shared;  // that surface mapped into this process
 static uint32_t *saved;   // what the screen showed when the game began
 static uint16_t *rowmap;  // which source row each picture row shows
 static uint16_t *colmap;  // which source column each picture column shows
@@ -102,6 +104,10 @@ void DG_Init(void) {
         // desktop paints everything around it. Nothing of the screen needs
         // saving, because the game never draws outside the window.
         windowed = 1;
+        surface = bunix_win_surface();
+        if (surface != 0) {
+            shared = bunix_surface_map(surface);
+        }
         size_picture(w, h);
         return;
     }
@@ -139,7 +145,15 @@ void DG_DrawFrame(void) {
             dst[x] = src[colmap[x]];
         }
     }
-    bunix_fb_write(0, frame, (size_t)screen_w * screen_h * 4);
+    const size_t bytes = (size_t)screen_w * screen_h * 4;
+    if (shared != NULL) {
+        // The compositor maps the same frames, so no copy crosses the system
+        // call boundary: we finish the picture and ring its doorbell.
+        memcpy(shared, frame, bytes);
+        bunix_flip(surface);
+    } else {
+        bunix_fb_write(0, frame, bytes);
+    }
 }
 
 uint32_t DG_GetTicksMs(void) {

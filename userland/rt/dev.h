@@ -64,6 +64,31 @@ static inline int bunix_win_open(const char *name, uint32_t *w, uint32_t *h) {
     return bunix_win_dims(w, h);
 }
 
+// The shared surface behind this window. Zero means there is no compositor or
+// the compositor did not make one, in which case a program falls back to
+// writing pixels to /dev/fb as a file.
+static inline uint64_t bunix_win_surface(void) {
+    char buf[32];
+    ssize_t n = bunix_readfile("/dev/win", buf, sizeof(buf) - 1);
+    if (n <= 0) return 0;
+    buf[n] = 0;
+    const char *p = buf;
+    uint64_t a = 0, b = 0, c = 0;
+    while (*p >= '0' && *p <= '9') a = a * 10 + (uint64_t)(*p++ - '0');
+    while (*p == ' ') p++;
+    while (*p >= '0' && *p <= '9') b = b * 10 + (uint64_t)(*p++ - '0');
+    while (*p == ' ') p++;
+    while (*p >= '0' && *p <= '9') c = c * 10 + (uint64_t)(*p++ - '0');
+    return b == 0 ? 0 : c;
+}
+
+// Rings the compositor's doorbell after a frame is in the shared surface. The
+// eight bytes are the surface id; no pixels cross the boundary.
+static inline void bunix_flip(uint64_t surface) {
+    uint64_t id = surface;
+    bunix_writeat("/dev/flip", 0, &id, sizeof(id));
+}
+
 // The screen's size in pixels, read from /proc/fb. Returns 0 on success and
 // -1 when there is no framebuffer, which is what a serial-only boot has.
 static inline int bunix_fb_dims(uint32_t *w, uint32_t *h) {

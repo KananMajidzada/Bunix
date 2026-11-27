@@ -44,6 +44,9 @@ typedef long ssize_t;
 #define SYS_PANIC       25
 #define SYS_FAULT       26
 #define SYS_MILLIS      27
+#define SYS_SURFACE_NEW 28
+#define SYS_SURFACE_MAP 29
+#define SYS_SURFACE_RELEASE 30
 
 #define BUNIX_PANIC_MAGIC 0x42554E49u
 
@@ -241,6 +244,20 @@ static inline size_t bunix_ps(char *buf, size_t count) {
 // Stops a process.
 static inline int bunix_kill(uint64_t id) {
     return (int)syscall1(SYS_KILL, id);
+}
+
+// Shared drawing surfaces: make one, map the same frames into this process,
+// and give the frames back when the compositor is done with the window.
+static inline uint64_t bunix_surface_new(uint32_t w, uint32_t h) {
+    return syscall2(SYS_SURFACE_NEW, w, h);
+}
+
+static inline uint32_t *bunix_surface_map(uint64_t id) {
+    return (uint32_t *)syscall1(SYS_SURFACE_MAP, id);
+}
+
+static inline int bunix_surface_release(uint64_t id) {
+    return (int)syscall1(SYS_SURFACE_RELEASE, id);
 }
 
 #endif
